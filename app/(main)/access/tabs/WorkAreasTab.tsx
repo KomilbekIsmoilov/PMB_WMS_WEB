@@ -5,7 +5,6 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Card } from 'primereact/card';
 import { Toast } from 'primereact/toast';
 import { InputText } from 'primereact/inputtext';
-import { InputNumber } from 'primereact/inputnumber';
 import { Dropdown } from 'primereact/dropdown';
 import { MultiSelect } from 'primereact/multiselect';
 import { DataTable } from 'primereact/datatable';
@@ -14,155 +13,259 @@ import { Button } from 'primereact/button';
 import { Divider } from 'primereact/divider';
 import { ConfirmDialog, confirmDialog } from 'primereact/confirmdialog';
 import api from '@/app/api/api';
-import axios from 'axios';
 
 type OptionT = { label: string; value: string };
 
-type BranchT = { code: string; name: string };
-type WhsT = { WhsCode: string; WhsName: string };
-type EmpT = { EmpID: string; Name: string };
-
-type CollectorRowT = { id: string; empId: string | null };
-
-type WorkAreaDocT = {
-  DocEntry: number;
-  U_Name: string;
-  U_Remark?: string | null;
-  U_Branch?: string | null;
-  U_ControllerEmpID?: string | null;
-  Warehouses?: string[];
-  Collectors?: string[];
+type BranchApiT = { BPLId: number; BPLName: string };
+type WhsApiT = { WhsCode: string; WhsName: string; BPLid: number; BinActivat: 'Y' | 'N' };
+type UserApiT = {
+  empID: number;
+  lastName: string;
+  firstName: string;
+  dept?: number | string | null; 
+  U_LOGIN?: string | null;
 };
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || ''; 
+type WorkAreaHeaderApiT = {
+  DocEntry: number;
+  DocNum: number;
+  Remark?: string | null;
+  U_Filial?: string | number | null;
+  U_Checker?: string | null;
+  U_WhsCodes?: string | null;
+};
+
+type WorkAreaRowApiT = {
+  U_UserCode: string;
+  DocEntry: number;
+};
+
+type CollectorRowT = { id: string; userCode: string | null };
 
 const uid = () => `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+
+const unwrap = <T,>(res: any): T => {
+  if (res && typeof res === 'object' && 'data' in res) return res.data as T;
+  return res as T;
+};
+
+const safeStr = (v: any) => (v === null || v === undefined ? '' : String(v));
+
+const parseWhsCodes = (raw?: string | null): string[] => {
+  const s = (raw || '').trim();
+  if (!s) return [];
+
+  if (s.startsWith('[') && s.endsWith(']')) {
+    try {
+      const arr = JSON.parse(s);
+      if (Array.isArray(arr)) return arr.map((x) => String(x).trim()).filter(Boolean);
+    } catch {}
+  }
+
+  return s
+    .split(/[,\|;]+/g)
+    .map((x) => x.trim())
+    .filter(Boolean);
+};
+
+const getUserCode = (u: UserApiT) => {
+  return u.U_LOGIN && u.U_LOGIN.trim() ? u.U_LOGIN.trim() : String(u.empID);
+};
+
+const getDept = (u: UserApiT) => {
+  const n = Number(u.dept);
+  return Number.isFinite(n) ? n : 0;
+};
 
 export default function WorkAreasTab() {
   const toast = useRef<Toast>(null);
 
-  // Search/load
-  const [searchDocEntry, setSearchDocEntry] = useState<number | null>(null);
-  const [loadingDoc, setLoadingDoc] = useState(false);
+  const [loadingSave, setLoadingSave] = useState(false);
+  const [loadingDict, setLoadingDict] = useState(false);
+  const [loadingRows, setLoadingRows] = useState(false);
 
-  // Form state
+  const [branches, setBranches] = useState<BranchApiT[]>([]);
+  const [allWhs, setAllWhs] = useState<WhsApiT[]>([]);
+  const [users, setUsers] = useState<UserApiT[]>([]);
+
+  const [workAreas, setWorkAreas] = useState<WorkAreaHeaderApiT[]>([]);
+  const [selectedWorkArea, setSelectedWorkArea] = useState<number | null>(null);
+
   const [docEntry, setDocEntry] = useState<number | null>(null);
-  const [name, setName] = useState('');
-  const [remark, setRemark] = useState('');
+  const [docNum, setDocNum] = useState<number | null>(null);
 
+  const [remark, setRemark] = useState('');
   const [branch, setBranch] = useState<string | null>(null);
   const [warehouses, setWarehouses] = useState<string[]>([]);
-  const [controllerEmpId, setControllerEmpId] = useState<string | null>(null);
+  const [checker, setChecker] = useState<string | null>(null);
 
-  // collectors grid
   const [collectorRows, setCollectorRows] = useState<CollectorRowT[]>([]);
 
-  // Dictionaries
-  const [branches, setBranches] = useState<BranchT[]>([]);
-  const [whsList, setWhsList] = useState<WhsT[]>([]);
-  const [employees, setEmployees] = useState<EmpT[]>([]); // umumiy ro‘yxat (filialga qarab)
-  const [loadingDict, setLoadingDict] = useState(false);
+  const isEditMode = !!docEntry;
 
   const branchOptions: OptionT[] = useMemo(
-    () => branches.map(b => ({ label: `${b.code} - ${b.name}`, value: b.code })),
+    () => branches.map((b) => ({ label: `${b.BPLId} - ${b.BPLName}`, value: String(b.BPLId) })),
     [branches]
   );
 
-  const whsOptions: OptionT[] = useMemo(
-    () => whsList.map(w => ({ label: `${w.WhsCode} - ${w.WhsName}`, value: w.WhsCode })),
-    [whsList]
-  );
+  const filteredWhs = useMemo(() => {
+    if (!branch) return [];
+    return allWhs.filter((w) => String(w.BPLid) === String(branch));
+  }, [allWhs, branch]);
 
-  const employeeOptions: OptionT[] = useMemo(
-    () => employees.map(e => ({ label: `${e.EmpID} - ${e.Name}`, value: e.EmpID })),
-    [employees]
-  );
+  const whsOptions: OptionT[] = useMemo(() => {
+    const base = filteredWhs.map((w) => ({ label: `${w.WhsCode} - ${w.WhsName}`, value: w.WhsCode }));
+    const exists = new Set(base.map((x) => x.value));
+    const missing = warehouses
+      .filter((code) => !exists.has(code))
+      .map((code) => ({ label: code, value: code }));
+    return [...base, ...missing];
+  }, [filteredWhs, warehouses]);
 
-  const usedCollectorIds = useMemo(() => {
-    return new Set(collectorRows.map(r => r.empId).filter(Boolean) as string[]);
+  const controllerOptions: OptionT[] = useMemo(() => {
+    return users
+      .filter((u) => getDept(u) === 1)
+      .map((u) => {
+        const code = getUserCode(u);
+        const fullName = `${u.lastName || ''} ${u.firstName || ''}`.trim();
+        return { label: `${code} - ${fullName || 'Без имени'}`, value: code };
+      });
+  }, [users]);
+
+  const collectorOptions: OptionT[] = useMemo(() => {
+    return users
+      .filter((u) => getDept(u) === 2)
+      .map((u) => {
+        const code = getUserCode(u);
+        const fullName = `${u.lastName || ''} ${u.firstName || ''}`.trim();
+        return { label: `${code} - ${fullName || 'Без имени'}`, value: code };
+      });
+  }, [users]);
+
+  const collectorsPayload = useMemo(() => {
+    return collectorRows
+      .map((r) => (r.userCode ? String(r.userCode).trim() : ''))
+      .filter(Boolean);
   }, [collectorRows]);
 
+  const usedCollectorCodes = useMemo(() => {
+    return new Set(collectorRows.map((r) => r.userCode).filter(Boolean) as string[]);
+  }, [collectorRows]);
 
-  const apiGet = async <T,>(url: string, params?: any) => {
-    const res = await axios.get<T>(`${API_BASE}${url}`, { params });
-    return res.data;
+  const optionsForCollectorRow = (row: CollectorRowT) => {
+    return collectorOptions.filter((o) => !usedCollectorCodes.has(o.value) || o.value === row.userCode);
   };
 
-  const apiPost = async <T,>(url: string, body: any) => {
-    const res = await axios.post<T>(`${API_BASE}${url}`, body);
-    return res.data;
+  const workAreaOptions: { label: string; value: number }[] = useMemo(() => {
+    return (workAreas || []).map((w) => ({
+      value: w.DocEntry,
+      label: `${w.DocNum} - ${w.Remark || 'Без комментария'}`,
+    }));
+  }, [workAreas]);
+
+  const loadDictionariesAndWorkAreas = async () => {
+    try {
+      setLoadingDict(true);
+
+      const [br, whs, us, wa] = await Promise.all([
+        api.get('/getBranchsApi'),
+        api.get('/getWhsCodesApi'),
+        api.get('/getUsersAllApi'),
+        api.get('/getWorksAreaHeaderApi'),
+      ]);
+
+      setBranches(unwrap<BranchApiT[]>(br) || []);
+      setAllWhs(unwrap<WhsApiT[]>(whs) || []);
+      setUsers(unwrap<UserApiT[]>(us) || []);
+      setWorkAreas(unwrap<WorkAreaHeaderApiT[]>(wa) || []);
+    } catch (e: any) {
+      toast.current?.show({
+        severity: 'error',
+        summary: 'Ошибка',
+        detail: e?.response?.data?.message || 'Не удалось загрузить справочники/рабочие зоны',
+        life: 3500,
+      });
+    } finally {
+      setLoadingDict(false);
+    }
   };
 
-  const apiPut = async <T,>(url: string, body: any) => {
-    const res = await axios.put<T>(`${API_BASE}${url}`, body);
-    return res.data;
-  };
+  const loadWorkAreaRows = async (de: number) => {
+    try {
+      setLoadingRows(true);
 
+      const res = await api.get('/getWorksAreaRowsApi', { params: { docEntry: de } });
+      const rows = unwrap<WorkAreaRowApiT[]>(res) || [];
+
+      const collectors = rows.map((r) => safeStr(r.U_UserCode).trim()).filter(Boolean);
+      setCollectorRows(collectors.map((code) => ({ id: uid(), userCode: code })));
+    } catch (e: any) {
+      toast.current?.show({
+        severity: 'warn',
+        summary: 'Внимание',
+        detail: e?.response?.data?.message || 'Не удалось загрузить строки сборщиков',
+        life: 3000,
+      });
+      setCollectorRows([]);
+    } finally {
+      setLoadingRows(false);
+    }
+  };
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        setLoadingDict(true);
-
-        // 1) Filiallar
-        // GET /api/dict/branches -> [{code,name}]
-        const br  = await api.get('/api/dict/branches');
-        setBranches(br  || []);
-
-      } catch (e) {
-        toast.current?.show({ severity: 'error', summary: 'Ошибка', detail: 'Справочники не загрузились', life: 3000 });
-      } finally {
-        setLoadingDict(false);
-      }
-    };
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    loadDictionariesAndWorkAreas();
   }, []);
 
-  // Branch o'zgarsa: warehouses + employees qayta yuklash
-  useEffect(() => {
-    const loadByBranch = async () => {
-      try {
-        if (!branch) {
-          setWhsList([]);
-          setEmployees([]);
-          setWarehouses([]);
-          setControllerEmpId(null);
-          setCollectorRows([]);
-          return;
-        }
-
-        // 2) Skaldlar
-        // GET /api/dict/warehouses?branch=TSH
-        const whs = await api.get<WhsT[]>('/api/dict/warehouses', { branch });
-        setWhsList(whs || []);
-
-        // 3) Hodimlar (контролёр + сборщики shu ro‘yxatdan)
-        // GET /api/dict/employees?branch=TSH
-        const emps = await api.get<EmpT[]>('/api/dict/employees', { branch });
-        setEmployees(emps || []);
-      } catch (e) {
-        toast.current?.show({ severity: 'warn', summary: 'Внимание', detail: 'Не удалось загрузить данные по филиалу', life: 3000 });
-      }
-    };
-    loadByBranch();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [branch]);
-
-  // ---------------------------
-  // Reset form
-  // ---------------------------
-  const resetForm = () => {
+  // ===== MODE: CREATE NEW =====
+  const startCreateNew = () => {
+    // agar xohlasang confirm ham qo‘shamiz, hozir sodda
+    setSelectedWorkArea(null);
     setDocEntry(null);
-    setName('');
+    setDocNum(null);
     setRemark('');
     setBranch(null);
     setWarehouses([]);
-    setControllerEmpId(null);
+    setChecker(null);
     setCollectorRows([]);
-    setSearchDocEntry(null);
+    toast.current?.show({ severity: 'info', summary: 'Режим', detail: 'Создание новой рабочей зоны', life: 2000 });
   };
 
+  // ===== APPLY EXISTING =====
+  const applyHeaderToForm = async (header: WorkAreaHeaderApiT) => {
+    const de = header.DocEntry;
+
+    setDocEntry(de);
+    setDocNum(header.DocNum ?? null);
+    setRemark(header.Remark || '');
+
+    const filial = header.U_Filial;
+    setBranch(filial === null || filial === undefined || filial === '' ? null : String(filial));
+
+    setChecker(header.U_Checker ? String(header.U_Checker) : null);
+    setWarehouses(parseWhsCodes(header.U_WhsCodes));
+
+    await loadWorkAreaRows(de);
+  };
+
+  const onWorkAreaChange = async (docEntryValue: number | null) => {
+    setSelectedWorkArea(docEntryValue);
+
+    if (!docEntryValue) {
+      startCreateNew();
+      return;
+    }
+
+    const header = workAreas.find((w) => Number(w.DocEntry) === Number(docEntryValue));
+    if (!header) {
+      toast.current?.show({ severity: 'warn', summary: 'Не найдено', detail: 'WorkArea не найден в списке', life: 2500 });
+      startCreateNew();
+      return;
+    }
+
+    await applyHeaderToForm(header);
+  };
+
+  // ===== RESET =====
   const askReset = () => {
     confirmDialog({
       message: 'Сбросить форму?',
@@ -170,143 +273,145 @@ export default function WorkAreasTab() {
       icon: 'pi pi-exclamation-triangle',
       acceptLabel: 'Да',
       rejectLabel: 'Нет',
-      accept: resetForm,
+      accept: startCreateNew,
     });
   };
 
-  // ---------------------------
-  // Collectors table logic
-  // ---------------------------
-  const addCollectorRow = () => {
-    setCollectorRows(prev => [...prev, { id: uid(), empId: null }]);
-  };
-
-  const removeCollectorRow = (rowId: string) => {
-    setCollectorRows(prev => prev.filter(r => r.id !== rowId));
-  };
-
-  const setCollectorEmp = (rowId: string, empId: string | null) => {
-    // duplicate protection
-    if (empId && usedCollectorIds.has(empId)) {
-      toast.current?.show({ severity: 'warn', summary: 'Дубликат', detail: 'Этот сборщик уже добавлен', life: 2500 });
+  useEffect(() => {
+    if (!branch) {
+      setWarehouses([]);
       return;
     }
-    setCollectorRows(prev => prev.map(r => (r.id === rowId ? { ...r, empId } : r)));
+    const allowed = new Set(filteredWhs.map((w) => w.WhsCode));
+    setWarehouses((prev) => prev.filter((code) => allowed.has(code)));
+  }, [branch]); 
+
+  const addCollectorRow = () => setCollectorRows((prev) => [...prev, { id: uid(), userCode: null }]);
+  const removeCollectorRow = (rowId: string) => setCollectorRows((prev) => prev.filter((r) => r.id !== rowId));
+
+  const setCollectorUser = (rowId: string, code: string | null) => {
+    if (code) {
+      const dup = collectorRows.some((r) => r.id !== rowId && r.userCode === code);
+      if (dup) {
+        toast.current?.show({ severity: 'warn', summary: 'Дубликат', detail: 'Этот сборщик уже добавлен', life: 2500 });
+        return;
+      }
+    }
+    setCollectorRows((prev) => prev.map((r) => (r.id === rowId ? { ...r, userCode: code } : r)));
   };
 
-  const collectorsPayload = useMemo(() => {
-    return collectorRows.map(r => r.empId).filter(Boolean) as string[];
-  }, [collectorRows]);
+  const collectorsCell = (row: CollectorRowT) => (
+    <Dropdown
+      value={row.userCode}
+      options={optionsForCollectorRow(row)}
+      onChange={(e) => setCollectorUser(row.id, e.value)}
+      placeholder="Выберите сборщика"
+      filter
+      showClear
+      style={{ width: '100%' }}
+      disabled={!branch}
+    />
+  );
 
-  // ---------------------------
-  // Load document for update
-  // ---------------------------
-  const loadDoc = async () => {
-    if (!searchDocEntry) {
-      toast.current?.show({ severity: 'info', summary: 'DocEntry', detail: 'Введите DocEntry', life: 2500 });
-      return;
-    }
+  const actionsCell = (row: CollectorRowT) => (
+    <Button icon="pi pi-trash" severity="danger" text onClick={() => removeCollectorRow(row.id)} tooltip="Удалить" />
+  );
 
+  const saveDraft = async  () => {
     try {
-      setLoadingDoc(true);
+      
+    
+    if (!remark || !remark.trim()) {
+  toast.current?.show({ severity: 'warn', summary: 'Проверка', detail: 'Комментарий (Remark) обязателен', life: 2500 });
+  return;
+}
 
-      // GET /api/work-areas/:docEntry
-      const doc = await apiGet<WorkAreaDocT>(`/api/work-areas/${searchDocEntry}`);
-
-      setDocEntry(doc?.DocEntry ?? searchDocEntry);
-      setName(doc?.U_Name ?? '');
-      setRemark(doc?.U_Remark ?? '');
-      setBranch(doc?.U_Branch ?? null);
-      setControllerEmpId(doc?.U_ControllerEmpID ?? null);
-      setWarehouses(doc?.Warehouses ?? []);
-
-      const cols = (doc?.Collectors ?? []).map((empId) => ({ id: uid(), empId }));
-      setCollectorRows(cols);
-
-      toast.current?.show({ severity: 'success', summary: 'Загружено', detail: `DocEntry ${searchDocEntry}`, life: 2000 });
-    } catch (e) {
-      toast.current?.show({ severity: 'error', summary: 'Ошибка', detail: 'Документ не найден или ошибка API', life: 3000 });
-    } finally {
-      setLoadingDoc(false);
-    }
-  };
-
-  // ---------------------------
-  // Save (create / update)
-  // ---------------------------
-  const save = async () => {
-    // validation
-    if (!name.trim()) {
-      toast.current?.show({ severity: 'warn', summary: 'Проверка', detail: 'Введите название рабочей зоны', life: 2500 });
-      return;
-    }
     if (!branch) {
       toast.current?.show({ severity: 'warn', summary: 'Проверка', detail: 'Выберите филиал', life: 2500 });
+      return;
+    }
+    if (!checker) {
+      toast.current?.show({ severity: 'warn', summary: 'Проверка', detail: 'Выберите контролёра', life: 2500 });
       return;
     }
     if (!warehouses.length) {
       toast.current?.show({ severity: 'warn', summary: 'Проверка', detail: 'Выберите склады', life: 2500 });
       return;
     }
-    if (!controllerEmpId) {
-      toast.current?.show({ severity: 'warn', summary: 'Проверка', detail: 'Выберите контролёра', life: 2500 });
-      return;
-    }
 
-    const payload = {
-      U_Name: name.trim(),
-      U_Remark: remark?.trim() || '',
-      U_Branch: branch,
-      U_ControllerEmpID: controllerEmpId,
-      Warehouses: warehouses,
-      Collectors: collectorsPayload,
+    setLoadingSave(true);
+
+    const payloadBase = {
+      Remark: remark?.trim() || '',
+      U_Filial: branch,             
+      U_Checker: checker,           
+      U_WhsCodes: warehouses,       
+      Collectors: collectorsPayload, 
     };
 
-    try {
-      if (docEntry) {
+    if (docEntry) {
+      // UPDATE
+      const payload = {
+        action: 'update',
+        DocEntry: docEntry,
+        DocNum: docNum,
+        ...payloadBase,
+      };
+       await api.post('patchWorksAreaApi' , payload )
+      
+      toast.current?.show({ severity: 'success', summary: 'Обновление', detail: 'Payload выведен в console.log', life: 2500 });
+    } else {
+      const payload = {
+        action: 'create',
+        ...payloadBase,
+      };
+       await api.post('postWorksAreaApi' , payload )
+      toast.current?.show({ severity: 'success', summary: 'Создание', detail: 'Payload выведен в console.log', life: 2500 });
+    }
 
-        await api.put(`/api/work-areas/${docEntry}`, payload);
-        toast.current?.show({ severity: 'success', summary: 'Обновлено', detail: `DocEntry ${docEntry}`, life: 2500 });
-      } else {
+    
+    } catch (error) {
+      console.log(error)
+    } finally {
+      setLoadingSave(false);
 
-        const created = await api.post<{ DocEntry: number }>('/api/work-areas', payload);
-        const newDocEntry = created?.DocEntry;
-        if (newDocEntry) setDocEntry(newDocEntry);
-        toast.current?.show({ severity: 'success', summary: 'Создано', detail: `DocEntry ${newDocEntry || ''}`, life: 2500 });
-      }
-    } catch (e) {
-      toast.current?.show({ severity: 'error', summary: 'Ошибка', detail: 'Не удалось сохранить (API)', life: 3500 });
     }
   };
 
-  // ---------------------------
-  // Render helpers
-  // ---------------------------
-  const collectorsCell = (row: CollectorRowT) => {
-    return (
-      <Dropdown
-        value={row.empId}
-        options={employeeOptions}
-        onChange={(e) => setCollectorEmp(row.id, e.value)}
-        placeholder="Выберите сборщика"
-        filter
-        showClear
-        style={{ width: '100%' }}
-      />
-    );
-  };
+  const deleteWorkArea = async () => {
+  if (!docEntry) return;
 
-  const actionsCell = (row: CollectorRowT) => {
-    return (
-      <Button
-        icon="pi pi-trash"
-        severity="danger"
-        text
-        onClick={() => removeCollectorRow(row.id)}
-        tooltip="Удалить"
-      />
-    );
-  };
+  confirmDialog({
+    header: 'Удалить?',
+    icon: 'pi pi-exclamation-triangle',
+    message: `Удалить рабочую зону (DocEntry: ${docEntry})?`,
+    acceptLabel: 'Да, удалить',
+    rejectLabel: 'Отмена',
+    accept: async () => {
+      try {
+        setLoadingSave(true);
+
+        await api.post('DeleteWorksAreaApi', { DocEntry: docEntry, DocNum: docNum });
+
+        toast.current?.show({ severity: 'success', summary: 'Удалено', detail: 'Рабочая зона удалена', life: 2500 });
+
+        await loadDictionariesAndWorkAreas();
+        startCreateNew();
+      } catch (error: any) {
+        console.log(error);
+        toast.current?.show({
+          severity: 'error',
+          summary: 'Ошибка',
+          detail: error?.response?.data?.message || 'Не удалось удалить',
+          life: 3500,
+        });
+      } finally {
+        setLoadingSave(false);
+      }
+    },
+  });
+};
+
 
   return (
     <>
@@ -314,49 +419,61 @@ export default function WorkAreasTab() {
       <ConfirmDialog />
 
       <Card>
-        {/* Top: load by DocEntry */}
+        {/* TOP */}
         <div className="grid">
-          <div className="col-12 md:col-3">
-            <label className="block mb-2">DocEntry (загрузить)</label>
-            <InputNumber
-              value={searchDocEntry}
-              onValueChange={(e) => setSearchDocEntry(e.value ?? null)}
-              placeholder="Введите DocEntry"
+          <div className="col-12 md:col-7">
+            <label className="block mb-2">Рабочая зона</label>
+            <Dropdown
+              value={selectedWorkArea}
+              options={workAreaOptions}
+              optionLabel="label"
+              optionValue="value"
+              onChange={(e) => onWorkAreaChange(e.value ?? null)}
+              placeholder={loadingDict ? 'Загрузка...' : 'Выберите рабочую зону'}
+              filter
+              showClear
               className="w-full"
-              useGrouping={false}
             />
+            <small className="text-600">
+              Режим: <b>{isEditMode ? 'Редактирование' : 'Создание'}</b>
+              {isEditMode ? ' (загружена существующая зона)' : ' (новая зона)'}
+            </small>
           </div>
-          <div className="col-12 md:col-3 flex align-items-end gap-2">
+
+          <div className="col-12 md:col-5 flex align-items-end justify-content-end gap-2">
             <Button
-              label={loadingDoc ? 'Загрузка...' : 'Загрузить'}
-              icon="pi pi-download"
-              onClick={loadDoc}
-              disabled={loadingDoc}
+              label="Новая рабочая зона"
+              icon="pi pi-plus"
+              onClick={startCreateNew}
+              severity="success"
+              outlined
             />
-            <Button label="Сброс" icon="pi pi-refresh" severity="secondary" onClick={askReset} />
-          </div>
-          <div className="col-12 md:col-6 flex align-items-end justify-content-end">
-            <div className="text-600">
-              {docEntry ? <>Режим: <b>Редактирование</b> (DocEntry {docEntry})</> : <>Режим: <b>Создание</b></>}
-            </div>
+            <Button
+              label={loadingDict ? 'Обновление...' : 'Обновить'}
+              icon="pi pi-refresh"
+              severity="secondary"
+              onClick={loadDictionariesAndWorkAreas}
+              disabled={loadingDict}
+            />
+            <Button label="Сброс" icon="pi pi-times" severity="secondary" onClick={askReset} />
+            {isEditMode && (
+            <Button
+              label="Удалить"
+              icon="pi pi-trash"
+              severity="danger"
+              outlined
+              onClick={deleteWorkArea}
+              disabled={loadingSave}
+            />
+          )}
           </div>
         </div>
 
         <Divider />
 
-        {/* Header form like SAP screenshot */}
+        {/* FORM */}
         <div className="grid">
-          <div className="col-12 md:col-3">
-            <label className="block mb-2">DocEntry</label>
-            <InputNumber value={docEntry} className="w-full" disabled useGrouping={false} />
-          </div>
-
-          <div className="col-12 md:col-6">
-            <label className="block mb-2">Название рабочей зоны</label>
-            <InputText value={name} onChange={(e) => setName(e.target.value)} className="w-full" placeholder="Например: Зона A" />
-          </div>
-
-          <div className="col-12 md:col-3">
+          <div className="col-12 md:col-4">
             <label className="block mb-2">Филиал</label>
             <Dropdown
               value={branch}
@@ -369,7 +486,26 @@ export default function WorkAreasTab() {
             />
           </div>
 
-          <div className="col-12 md:col-6">
+          <div className="col-12 md:col-4">
+            <label className="block mb-2">Контролёр</label>
+            <Dropdown
+              value={checker}
+              options={controllerOptions}
+              onChange={(e) => setChecker(e.value)}
+              placeholder={!branch ? 'Сначала выберите филиал' : 'Выберите контролёра'}
+              filter
+              showClear
+              className="w-full"
+              disabled={!branch}
+            />
+          </div>
+
+          <div className="col-12 md:col-4">
+            <label className="block mb-2">Комментарий</label>
+            <InputText value={remark} onChange={(e) => setRemark(e.target.value)} className="w-full" placeholder="Комментарий" />
+          </div>
+
+          <div className="col-12">
             <label className="block mb-2">Склады</label>
             <MultiSelect
               value={warehouses}
@@ -382,45 +518,36 @@ export default function WorkAreasTab() {
               disabled={!branch}
             />
           </div>
-
-          <div className="col-12 md:col-3">
-            <label className="block mb-2">Контролёр</label>
-            <Dropdown
-              value={controllerEmpId}
-              options={employeeOptions}
-              onChange={(e) => setControllerEmpId(e.value)}
-              placeholder={!branch ? 'Сначала выберите филиал' : 'Выберите контролёра'}
-              filter
-              showClear
-              className="w-full"
-              disabled={!branch}
-            />
-          </div>
-
-          <div className="col-12 md:col-3">
-            <label className="block mb-2">Remark</label>
-            <InputText value={remark} onChange={(e) => setRemark(e.target.value)} className="w-full" placeholder="Комментарий" />
-          </div>
         </div>
 
         <Divider />
 
-        {/* Collectors grid */}
+        {/* COLLECTORS */}
         <div className="flex align-items-center justify-content-between mb-2">
-          <div className="text-900 font-medium">Сборщики (работают в этой зоне)</div>
+          <div className="text-900 font-medium">
+            Сборщики{' '}
+            {loadingRows ? <span className="text-600"> — загрузка...</span> : null}
+          </div>
+
           <Button label="Добавить строку" icon="pi pi-plus" onClick={addCollectorRow} />
         </div>
 
         <DataTable value={collectorRows} dataKey="id" emptyMessage="Нет сборщиков">
           <Column header="#" body={(_, opt) => (opt.rowIndex ?? 0) + 1} style={{ width: 60 }} />
-          <Column header="Сборщики ID" body={collectorsCell} />
+          <Column header="Сборщик" body={collectorsCell} />
           <Column header="" body={actionsCell} style={{ width: 70 }} />
         </DataTable>
 
         <Divider />
 
         <div className="flex gap-2">
-          <Button label={docEntry ? 'Сохранить изменения' : 'Создать'} icon="pi pi-check" onClick={save} />
+          <Button
+            label={isEditMode ? 'Сохранить изменения' : 'Создать'}
+            icon="pi pi-check"
+            disabled={loadingSave}
+            loading={loadingSave}
+            onClick={saveDraft}
+          />
           <Button label="Отменить" icon="pi pi-times" severity="secondary" onClick={askReset} />
         </div>
       </Card>
