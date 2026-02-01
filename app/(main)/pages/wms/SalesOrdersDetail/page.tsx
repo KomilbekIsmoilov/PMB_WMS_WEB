@@ -1,7 +1,7 @@
 // src/app/(main)/pages/wms/SalesOrdersDetail/page.tsx
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import { Card } from 'primereact/card';
@@ -14,13 +14,46 @@ import { Column } from 'primereact/column';
 import { InputText } from 'primereact/inputtext';
 import { ProgressBar } from 'primereact/progressbar';
 import { FilterMatchMode } from 'primereact/api';
-import { InputNumber } from 'primereact/inputnumber';
 
 import api from '@/app/api/api';
 import { useOrderPickRoom } from '@/app/socket/useOrderPickRoom';
 
+import CollectAllocationsModal, { CollectLineT } from '../../components/CollectAllocationsModal';
+const safeInt = (v: any, def = 0) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : def;
+};
+
+
+type UserStampT = {
+  empID?: number;
+  userId?: string;
+  username?: string;
+  fullName?: string;
+};
+
+type BinAllocT = {
+  BinAbsEntry: number;
+  BinCode?: string;
+  BatchNumber?: string | null;
+  ExpDate?: string | null;
+  Quantity: number;
+};
+
+type CollectEventT = {
+  at?: string;
+  by?: UserStampT;
+  BinAbsEntry?: number;
+  BinCode?: string;
+  BatchNumber?: string | null;
+  ExpDate?: string | null;
+  QtyDelta?: number;
+  CountDelta?: number;
+  note?: string;
+};
+
 type OrderDocLineT = {
-  // header fields (takror kelishi mumkin — 1chi rowdan olamiz)
+  // header
   DocNum: number;
   DocEntry: number;
   DocStatus?: string | null;
@@ -36,7 +69,7 @@ type OrderDocLineT = {
   U_WorkAreaName?: string | null;
   SlpName?: string | null;
 
-  // line fields (API qaytarishi SHART bo'lganlar)
+  // line
   LineNum?: number | null;
   ItemCode: string;
   ItemName?: string | null;
@@ -49,7 +82,11 @@ type OrderDocLineT = {
   CollectedQuantity?: number | string;
   CollectedCount?: number | string;
 
-  // UI
+  BinAllocations?: BinAllocT[];
+  CollectedEvents?: CollectEventT[];
+  LastCollectedAt?: string | null;
+  LastCollectedBy?: UserStampT | null;
+
   uiKey?: string;
 };
 
@@ -57,7 +94,6 @@ const num = (v: any) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 };
-
 const fmtNum = (v: any, digits = 2) =>
   new Intl.NumberFormat('ru-RU', { maximumFractionDigits: digits, minimumFractionDigits: 0 }).format(num(v));
 
@@ -67,25 +103,20 @@ const fmtDate = (v: any) => {
   if (Number.isNaN(d.getTime())) return String(v);
   return d.toLocaleDateString('ru-RU');
 };
-
 const fmtDateTime = (v: any) => {
   if (!v) return '';
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) return String(v);
   return d.toLocaleString('ru-RU');
 };
-
 const clamp = (v: number, a = 0, b = 100) => Math.max(a, Math.min(b, v));
 
 function buildDocCreatedAt(createDate?: any, docTime?: any) {
-  // CreateDate: '2026-01-21' ; DocTime: '1345' yoki 1345
   const cd = createDate ? String(createDate).trim() : '';
   if (!cd) return '';
-
   let t = '';
   if (docTime != null) {
     const raw = String(docTime).trim();
-    // SAP DocTime ko'pincha 1345 (HHmm)
     if (/^\d{3,4}$/.test(raw)) {
       const padded = raw.padStart(4, '0');
       t = `${padded.slice(0, 2)}:${padded.slice(2, 4)}:00`;
@@ -93,11 +124,17 @@ function buildDocCreatedAt(createDate?: any, docTime?: any) {
       t = raw.length === 5 ? `${raw}:00` : raw;
     }
   }
-  const iso = t ? `${cd}T${t}` : cd;
-  return iso;
+  return t ? `${cd}T${t}` : cd;
 }
 
+const normStr = (v: any) => String(v ?? '').trim();
+
 export default function SalesOrdersDetailPage() {
+  // -------- modal state --------
+  const [collectOpen, setCollectOpen] = useState(false);
+  const [collectLine, setCollectLine] = useState<CollectLineT | null>(null);
+  const [collectKey, setCollectKey] = useState<string | null>(null);
+
   const toast = useRef<Toast>(null);
   const router = useRouter();
   const sp = useSearchParams();
@@ -111,6 +148,7 @@ export default function SalesOrdersDetailPage() {
   }, [DocEntry]);
 
   const { socket, connected, room, error: socketError } = useOrderPickRoom(Number.isFinite(docEntryNum) ? docEntryNum : null);
+  const [joinedRoom, setJoinedRoom] = useState<string>(''); // ✅ join ack’dan room
 
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -123,21 +161,96 @@ export default function SalesOrdersDetailPage() {
     global: { value: null, matchMode: FilterMatchMode.CONTAINS },
   });
 
-  // uiKey: ideal -> LineNum, fallback -> ItemCode|||WhsCode
-  const lineKey = (r: OrderDocLineT) => {
-    const ln = r.LineNum;
+  // -------- key helpers --------
+  const lineKey = useCallback((r: { LineNum?: any; ItemCode?: any; WhsCode?: any }) => {
+    const ln = r?.LineNum;
     if (ln != null && Number.isFinite(Number(ln))) return `L:${Number(ln)}`;
-    return `K:${String(r.ItemCode || '').trim()}|||${String(r.WhsCode || '').trim()}`;
-  };
+    return `K:${normStr(r?.ItemCode)}|||${normStr(r?.WhsCode)}`;
+  }, []);
 
-  const [editCollected, setEditCollected] = useState<Record<string, number>>({});
-  const [dirty, setDirty] = useState<Record<string, boolean>>({});
-  const [savingAll, setSavingAll] = useState(false);
+  const makeUiKey = useCallback((line: any) => {
+    return lineKey(line);
+  }, [lineKey]);
 
+  const patchOrInsertRow = useCallback(
+    (prev: OrderDocLineT[], rawLine: any) => {
+      if (!rawLine) return prev;
+
+      const k = makeUiKey(rawLine);
+      const idx = prev.findIndex((x) => lineKey(x) === k);
+
+      const header = prev?.[0] || null;
+
+      // ✅ addLine’dan keladigan Line’da header fields yo‘q bo‘lishi mumkin
+      const filled = {
+        DocEntry: safeInt(rawLine.DocEntry ?? header?.DocEntry ?? DocEntry, 0),
+        DocNum: safeInt(rawLine.DocNum ?? header?.DocNum ?? DocNum, 0),
+        DocStatus: rawLine.DocStatus ?? header?.DocStatus,
+        DocDate: rawLine.DocDate ?? header?.DocDate,
+        DocDueDate: rawLine.DocDueDate ?? header?.DocDueDate,
+        CardCode: rawLine.CardCode ?? header?.CardCode,
+        CardName: rawLine.CardName ?? header?.CardName,
+        Comments: rawLine.Comments ?? header?.Comments,
+        DocTime: rawLine.DocTime ?? header?.DocTime,
+        CreateDate: rawLine.CreateDate ?? header?.CreateDate,
+        BPLName: rawLine.BPLName ?? header?.BPLName,
+        U_State: rawLine.U_State ?? header?.U_State,
+        U_WorkAreaName: rawLine.U_WorkAreaName ?? header?.U_WorkAreaName,
+        SlpName: rawLine.SlpName ?? header?.SlpName,
+
+        LineNum: rawLine.LineNum ?? null,
+        ItemCode: rawLine.ItemCode ?? '',
+        ItemName: rawLine.ItemName ?? null,
+        WhsCode: rawLine.WhsCode ?? '',
+        WhsName: rawLine.WhsName ?? null,
+
+        Quantity: rawLine.Quantity ?? 0,
+        OpenQty: rawLine.OpenQty ?? rawLine.Quantity ?? 0,
+
+        CollectedQuantity: rawLine.CollectedQuantity ?? 0,
+        CollectedCount: rawLine.CollectedCount ?? 0,
+
+        BinAllocations: rawLine.BinAllocations ?? [],
+        CollectedEvents: rawLine.CollectedEvents ?? [],
+        LastCollectedAt: rawLine.LastCollectedAt ?? null,
+        LastCollectedBy: rawLine.LastCollectedBy ?? null,
+      } as OrderDocLineT;
+
+      if (idx >= 0) {
+        const cur = prev[idx];
+        const next = { ...cur, ...filled, uiKey: cur.uiKey || k };
+        const out = [...prev];
+        out[idx] = next;
+        return out;
+      }
+
+      // ✅ new row
+      return [...prev, { ...filled, uiKey: k }];
+    },
+    [DocEntry, DocNum, lineKey, makeUiKey]
+  );
+
+  const removeRowByPayload = useCallback(
+    (prev: OrderDocLineT[], p: any) => {
+      const line = p?.Line || p?.line || null;
+      const ln = line?.LineNum ?? p?.LineNum;
+      const item = normStr(line?.ItemCode ?? p?.ItemCode);
+      const whs = normStr(line?.WhsCode ?? p?.WhsCode);
+
+      const k =
+        ln != null && Number.isFinite(Number(ln))
+          ? `L:${Number(ln)}`
+          : `K:${item}|||${whs}`;
+
+      return prev.filter((r) => lineKey(r) !== k);
+    },
+    [lineKey]
+  );
+
+  // -------- header/totals --------
   const headerInfo = useMemo(() => {
     const r = rows?.[0];
     if (!r) return null;
-
     const createdIso = buildDocCreatedAt(r.CreateDate, r.DocTime);
     return {
       DocNum: r.DocNum ?? Number(DocNum),
@@ -162,19 +275,17 @@ export default function SalesOrdersDetailPage() {
     const collected = arr.reduce((s, r) => s + num(r.CollectedQuantity), 0);
     const remaining = Math.max(openQty - collected, 0);
     const pct = openQty > 0 ? (collected / openQty) * 100 : 0;
+    return { lines: arr.length, openQty, collected, remaining, pct: clamp(pct) };
+  }, [rows]);
 
-    const dirtyCount = Object.values(dirty).filter(Boolean).length;
+  const docStatusTag = useMemo(() => {
+    if (!rows.length) return <Tag value="Пусто" severity="secondary" />;
+    if (totals.remaining <= 0 && totals.openQty > 0) return <Tag value="Собрано" severity="success" />;
+    if (totals.collected > 0) return <Tag value="В процессе" severity="warning" />;
+    return <Tag value="Не начато" severity="danger" />;
+  }, [rows.length, totals.remaining, totals.openQty, totals.collected]);
 
-    return {
-      lines: arr.length,
-      openQty,
-      collected,
-      remaining,
-      pct: clamp(pct),
-      dirtyCount,
-    };
-  }, [rows, dirty]);
-
+  // -------- filters --------
   const onGlobalFilterChange = (value: string) => {
     const _filters: DataTableFilterMeta = { ...filters };
     (_filters['global'] as any).value = value;
@@ -182,40 +293,24 @@ export default function SalesOrdersDetailPage() {
     setGlobalFilterValue(value);
   };
 
-  const load = async () => {
+  // -------- load from API --------
+  const load = useCallback(async () => {
     try {
       if (!DocEntry) {
         toast.current?.show({ severity: 'warn', summary: 'Внимание', detail: 'DocEntry не указан в URL', life: 3000 });
         return;
       }
-
       setLoading(true);
 
-      // ✅ Siz backendda shu API ni qilasiz (SAP + Mongo merge):
-      // - lines: ItemCode, ItemName, LineNum, WhsCode, WhsName, Quantity/OpenQty
-      // - mongo: CollectedQuantity/CollectedCount ...
-      const res = await api.get('/getOrdersDocsItemsApi', { params: { DocEntry, DocNum } });
-
-
+      const res = await api.get('/getOrdersDocsItemsApi', { params: { DocEntry, DocNum, includeEvents: 1 } });
       const data = (res?.data ?? res) as OrderDocLineT[];
+
       const normalized = (Array.isArray(data) ? data : []).map((r) => {
-        const key = `L:${r.LineNum != null ? Number(r.LineNum) : ''}`.trim();
+        const key = makeUiKey(r);
         return { ...r, uiKey: key };
       });
 
       setRows(normalized);
-
-      setEditCollected((prev) => {
-        const next = { ...prev };
-        for (const r of normalized) {
-          const k = lineKey(r);
-          if (next[k] === undefined) next[k] = num(r.CollectedQuantity);
-        }
-        return next;
-      });
-
-      // reload bo'lganda dirty ni reset qilamiz (xohlasangiz saqlab qolasiz)
-      setDirty({});
     } catch (e: any) {
       toast.current?.show({
         severity: 'error',
@@ -226,90 +321,62 @@ export default function SalesOrdersDetailPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [DocEntry, DocNum, makeUiKey]);
 
   useEffect(() => {
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [DocEntry]);
+  }, [load]);
 
-  // realtime: serverdan lineUpdated kelsa UI update
+  useEffect(() => {
+    if (!socket || !connected) return;
+    if (!Number.isFinite(docEntryNum)) return;
+
+    socket.emit('orderPick:joinDoc', { DocEntry: docEntryNum }, (ack: any) => {
+      if (ack?.ok && ack?.room) setJoinedRoom(String(ack.room));
+    });
+
+    return () => {
+      socket.emit('orderPick:leaveDoc', { DocEntry: docEntryNum });
+    };
+  }, [socket, connected, docEntryNum]);
+
   useEffect(() => {
     if (!socket) return;
 
     const onLineUpdated = (p: any) => {
-      const ln = p?.Line?.LineNum ?? p?.LineNum ?? p?.Line?.lineNum;
-      const item = String(p?.Line?.ItemCode || p?.ItemCode || '').trim();
-      const whs = String(p?.Line?.WhsCode || p?.WhsCode || '').trim();
-
-      const k =
-        ln != null && Number.isFinite(Number(ln))
-          ? `L:${Number(ln)}`
-          : `K:${item}|||${whs}`;
-
-      const newQty = num(p?.Line?.CollectedQuantity ?? p?.CollectedQuantity);
-      const newCount = num(p?.Line?.CollectedCount ?? p?.CollectedCount);
-
-      setRows((prev) =>
-        prev.map((r) => {
-          if (lineKey(r) !== k) return r;
-          const open = num(r.OpenQty ?? r.Quantity);
-          return {
-            ...r,
-            CollectedQuantity: newQty,
-            CollectedCount: newCount || num(r.CollectedCount),
-            // remaining UI uchun hisoblab qo'yamiz (server qaytarmasa ham)
-            OpenQty: r.OpenQty ?? r.Quantity,
-          };
-        })
-      );
-
-      setEditCollected((prev) => ({ ...prev, [k]: newQty }));
-      setDirty((prev) => ({ ...prev, [k]: false }));
+      const line = p?.Line || p?.line || null;
+      if (!line) return;
+      setRows((prev) => patchOrInsertRow(prev, line));
     };
 
     const onLineAdded = (p: any) => {
-      const line = p?.Line;
+      const line = p?.Line || p?.line || null;
       if (!line) return;
-      setRows((prev) => [...prev, line]);
+      setRows((prev) => patchOrInsertRow(prev, line));
     };
 
     const onLineRemoved = (p: any) => {
-      const ln = p?.LineNum;
-      const item = String(p?.ItemCode || '').trim();
-      const whs = String(p?.WhsCode || '').trim();
-      const k = ln != null ? `L:${Number(ln)}` : `K:${item}|||${whs}`;
-      setRows((prev) => prev.filter((r) => lineKey(r) !== k));
-      setEditCollected((prev) => {
-        const n = { ...prev };
-        delete n[k];
-        return n;
-      });
-      setDirty((prev) => {
-        const n = { ...prev };
-        delete n[k];
-        return n;
-      });
+      setRows((prev) => removeRowByPayload(prev, p));
+    };
+
+    const onLinesSynced = (p: any) => {
+      load();
     };
 
     socket.on('orderPick:lineUpdated', onLineUpdated);
     socket.on('orderPick:lineAdded', onLineAdded);
     socket.on('orderPick:lineRemoved', onLineRemoved);
+    socket.on('orderPick:linesSynced', onLinesSynced);
 
     return () => {
       socket.off('orderPick:lineUpdated', onLineUpdated);
       socket.off('orderPick:lineAdded', onLineAdded);
       socket.off('orderPick:lineRemoved', onLineRemoved);
+      socket.off('orderPick:linesSynced', onLinesSynced);
     };
-  }, [socket]);
+  }, [socket, patchOrInsertRow, removeRowByPayload, load]);
 
-  const docStatusTag = useMemo(() => {
-    if (!rows.length) return <Tag value="Пусто" severity="secondary" />;
-    if (totals.remaining <= 0 && totals.openQty > 0) return <Tag value="Собрано" severity="success" />;
-    if (totals.collected > 0) return <Tag value="В процессе" severity="warning" />;
-    return <Tag value="Не начато" severity="danger" />;
-  }, [rows.length, totals.remaining, totals.openQty, totals.collected]);
-
+  // -------- table renders --------
   const rowClassName = (r: OrderDocLineT) => {
     const open = num(r.OpenQty ?? r.Quantity);
     const col = num(r.CollectedQuantity);
@@ -326,9 +393,7 @@ export default function SalesOrdersDetailPage() {
     return (
       <div className="flex flex-column gap-1" style={{ minWidth: 180 }}>
         <div className="flex align-items-center justify-content-between">
-          <span className="text-600 text-sm">
-            {fmtNum(collected, 2)} / {fmtNum(open, 2)}
-          </span>
+          <span className="text-600 text-sm">{fmtNum(collected, 2)} / {fmtNum(open, 2)}</span>
           <span className="text-600 text-sm">{Math.round(pct)}%</span>
         </div>
         <ProgressBar value={pct} showValue={false} style={{ height: 8 }} />
@@ -336,70 +401,114 @@ export default function SalesOrdersDetailPage() {
     );
   };
 
-  const saveAll = async () => {
-    if (!socket || !socket.connected) {
-      toast.current?.show({ severity: 'warn', summary: 'Socket', detail: 'Нет соединения', life: 2500 });
-      return;
+  const renderCollectedByUsers = (r: OrderDocLineT) => {
+    const ev = Array.isArray(r.CollectedEvents) ? r.CollectedEvents : [];
+    const m = new Map<string, { name: string; qty: number }>();
+
+    for (const e of ev) {
+      const q = num(e?.QtyDelta);
+      if (!q) continue;
+      const name = normStr(e?.by?.fullName || e?.by?.username) || '—';
+      const key = String(e?.by?.empID || name);
+      const cur = m.get(key) || { name, qty: 0 };
+      cur.qty += q;
+      m.set(key, cur);
     }
 
-    const dirtyKeys = Object.keys(dirty).filter((k) => dirty[k]);
-    if (!dirtyKeys.length) {
-      toast.current?.show({ severity: 'info', summary: 'Сохранение', detail: 'Нет изменений', life: 1500 });
-      return;
+    const arr = Array.from(m.values()).filter((x) => x.qty !== 0).sort((a, b) => b.qty - a.qty);
+    if (!arr.length) return <span className="text-500">-</span>;
+
+    return (
+      <div className="flex flex-wrap gap-1">
+        {arr.slice(0, 6).map((x, idx) => (
+          <Tag key={idx} value={`${x.name}: ${fmtNum(x.qty, 2)}`} severity="info" />
+        ))}
+        {arr.length > 6 ? <Tag value={`+${arr.length - 6}`} severity="secondary" /> : null}
+      </div>
+    );
+  };
+
+  const renderBins = (r: OrderDocLineT) => {
+    const bins = Array.isArray(r.BinAllocations) ? r.BinAllocations : [];
+    if (!bins.length) return <span className="text-500">-</span>;
+    const sorted = [...bins].sort((a, b) => num(b.Quantity) - num(a.Quantity));
+
+    return (
+      <div className="flex flex-column gap-1">
+        {sorted.slice(0, 4).map((b, idx) => (
+          <div key={idx} className="flex justify-content-between gap-2">
+            <span className="font-medium">{b.BinCode || b.BinAbsEntry}</span>
+            <span className="text-600">{fmtNum(b.Quantity, 2)}</span>
+          </div>
+        ))}
+        {sorted.length > 4 ? <span className="text-500 text-sm">+ ещё {sorted.length - 4}</span> : null}
+      </div>
+    );
+  };
+
+  const renderBatches = (r: OrderDocLineT) => {
+    const bins = Array.isArray(r.BinAllocations) ? r.BinAllocations : [];
+    const m = new Map<string, number>();
+    for (const b of bins) {
+      const bn = normStr(b.BatchNumber);
+      if (!bn) continue;
+      m.set(bn, (m.get(bn) || 0) + num(b.Quantity));
     }
+    const arr = Array.from(m.entries()).sort((a, b) => b[1] - a[1]);
+    if (!arr.length) return <span className="text-500">-</span>;
 
-    setSavingAll(true);
+    return (
+      <div className="flex flex-wrap gap-1">
+        {arr.slice(0, 5).map(([bn, q]) => (
+          <Tag key={bn} value={`${bn}: ${fmtNum(q, 2)}`} severity="success" />
+        ))}
+        {arr.length > 5 ? <Tag value={`+${arr.length - 5}`} severity="secondary" /> : null}
+      </div>
+    );
+  };
 
-    let okCount = 0;
-    let failCount = 0;
+  // -------- modal open/close + live sync --------
+  const openCollectModal = (r: OrderDocLineT) => {
+    const k = lineKey(r);
+    setCollectKey(k);
 
-    // line -> payload topish
-    const rowByKey = new Map<string, OrderDocLineT>();
-    for (const r of rows) rowByKey.set(lineKey(r), r);
+    setCollectLine({
+      LineNum: r.LineNum,
+      ItemCode: r.ItemCode,
+      ItemName: r.ItemName,
+      WhsCode: r.WhsCode,
+      WhsName: r.WhsName,
+      Quantity: r.Quantity,
+      OpenQty: r.OpenQty,
+      CollectedQuantity: r.CollectedQuantity,
+      BinAllocations: r.BinAllocations || [],
+      CollectedEvents: r.CollectedEvents || [],
+    });
 
-    for (const k of dirtyKeys) {
-      const r = rowByKey.get(k);
-      if (!r) continue;
+    setCollectOpen(true);
+  };
 
-      const open = num(r.OpenQty ?? r.Quantity);
-      const newQty = Math.max(0, Math.min(num(editCollected[k]), open));
+  useEffect(() => {
+    if (!collectOpen || !collectKey) return;
 
-      // eslint-disable-next-line no-await-in-loop
-      await new Promise<void>((resolve) => {
-        socket.emit(
-          'orderPick:setCollected',
-          {
-            DocEntry: Number(DocEntry),
-            DocNum: Number(DocNum),
-            LineNum: r.LineNum,
-            ItemCode: r.ItemCode,
-            WhsCode: r.WhsCode,
-            CollectedQuantity: newQty,
-          },
-          (ack: any) => {
-            if (!ack?.ok) {
-              failCount += 1;
-            } else {
-              okCount += 1;
-            }
-            resolve();
-          }
-        );
-      });
-    }
+    const r = rows.find((x) => lineKey(x) === collectKey);
+    if (!r) return;
 
-    setSavingAll(false);
+    setCollectLine((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        CollectedQuantity: r.CollectedQuantity,
+        BinAllocations: r.BinAllocations || [],
+        CollectedEvents: r.CollectedEvents || [],
+      };
+    });
+  }, [rows, collectOpen, collectKey, lineKey]);
 
-    if (failCount > 0) {
-      toast.current?.show({
-        severity: 'warn',
-        summary: 'Сохранено частично',
-        detail: `OK: ${okCount}, Ошибка: ${failCount}`,
-        life: 3500,
-      });
-    } else {
-      toast.current?.show({ severity: 'success', summary: 'Сохранено', detail: `Строк: ${okCount}`, life: 2500 });
-    }
+  const closeCollectModal = () => {
+    setCollectOpen(false);
+    setCollectLine(null);
+    setCollectKey(null);
   };
 
   return (
@@ -424,7 +533,7 @@ export default function SalesOrdersDetailPage() {
             {mounted ? (
               <>
                 <Tag value={connected ? 'Socket: Online' : 'Socket: Offline'} severity={connected ? 'success' : 'danger'} />
-                {room ? <Tag value={room} severity="info" /> : <Tag value="Room: -" severity="secondary" />}
+                <Tag value={(joinedRoom || room) ? String(joinedRoom || room) : 'Room: -'} severity={(joinedRoom || room) ? 'info' : 'secondary'} />
                 {socketError ? <Tag value={`Socket error: ${socketError}`} severity="warning" /> : null}
               </>
             ) : (
@@ -443,9 +552,7 @@ export default function SalesOrdersDetailPage() {
               <div className="flex align-items-center gap-2 flex-wrap">
                 <span className="text-xl font-semibold">Заказ № {headerInfo?.DocNum ?? DocNum ?? '-'}</span>
               </div>
-              <div className="text-600">
-                {headerInfo ? `${headerInfo.CardCode || ''} • ${headerInfo.CardName || ''}` : 'Загрузка данных...'}
-              </div>
+              <div className="text-600">{headerInfo ? `${headerInfo.CardCode || ''} • ${headerInfo.CardName || ''}` : 'Загрузка данных...'}</div>
             </div>
           }
         >
@@ -454,24 +561,19 @@ export default function SalesOrdersDetailPage() {
               <div className="text-600 text-sm">Дата</div>
               <div className="font-semibold">{fmtDate(headerInfo?.DocDate)}</div>
             </div>
-
             <div className="col-12 md:col-3">
               <div className="text-600 text-sm">Срок</div>
               <div className="font-semibold">{fmtDate(headerInfo?.DocDueDate)}</div>
             </div>
-
             <div className="col-12 md:col-3">
               <div className="text-600 text-sm">Менеджер</div>
               <div className="font-semibold">{headerInfo?.SlpName || '-'}</div>
               <div className="text-500 text-sm">{headerInfo?.BPLName || ''}</div>
             </div>
-
             <div className="col-12 md:col-3">
               <div className="text-600 text-sm">Зона</div>
               <div className="font-semibold">{headerInfo?.WorkAreaName || '-'}</div>
-              <div className="text-500 text-sm">
-                Заказ получен: {headerInfo?.createdIso ? fmtDateTime(headerInfo.createdIso) : '-'}
-              </div>
+              <div className="text-500 text-sm">Заказ получен: {headerInfo?.createdIso ? fmtDateTime(headerInfo.createdIso) : '-'}</div>
             </div>
           </div>
 
@@ -483,7 +585,6 @@ export default function SalesOrdersDetailPage() {
                 <Tag value={`OpenQty: ${fmtNum(totals.openQty, 2)}`} severity="info" />
                 <Tag value={`Собрано: ${fmtNum(totals.collected, 2)}`} severity="success" />
                 <Tag value={`Осталось: ${fmtNum(totals.remaining, 2)}`} severity={totals.remaining <= 0 ? 'success' : 'warning'} />
-                <Tag value={`Изменений: ${totals.dirtyCount}`} severity={totals.dirtyCount ? 'warning' : 'secondary'} />
               </div>
 
               <span className="p-input-icon-left">
@@ -521,11 +622,7 @@ export default function SalesOrdersDetailPage() {
               onFilter={(e) => setFilters(e.filters)}
               globalFilterFields={['ItemCode', 'ItemName', 'WhsCode', 'WhsName']}
             >
-              <Column
-                header="#"
-                style={{ width: 80 }}
-                body={(r: OrderDocLineT) => (r.LineNum != null ? r.LineNum : '-')}
-              />
+              <Column header="#" style={{ width: 70 }} body={(r: OrderDocLineT) => (r.LineNum != null ? r.LineNum : '-')} />
               <Column field="ItemCode" header="Код" sortable style={{ minWidth: 140 }} />
               <Column field="ItemName" header="Товар" sortable style={{ minWidth: 320 }} />
 
@@ -549,49 +646,37 @@ export default function SalesOrdersDetailPage() {
 
               <Column header="Прогресс" style={{ minWidth: 220 }} body={progressBody} />
 
-              {/* ✅ “Собрано” — edit input */}
               <Column
-                header="Собрано (ввод)"
-                style={{ minWidth: 220 }}
-                body={(r: OrderDocLineT) => {
-                  const k = lineKey(r);
-                  const open = num(r.OpenQty ?? r.Quantity);
-                  const value = editCollected[k] ?? num(r.CollectedQuantity);
-                  const isDirty = !!dirty[k] && value !== num(r.CollectedQuantity);
-
-                  return (
-                    <div className="flex align-items-center gap-2">
-                      <InputNumber
-                        value={value}
-                        min={0}
-                        max={open}
-                        inputStyle={{ width: 120, textAlign: 'right' }}
-                        onValueChange={(e) => {
-                          const v = num(e.value);
-                          setEditCollected((p) => ({ ...p, [k]: v }));
-                          setDirty((p) => ({ ...p, [k]: true }));
-                        }}
-                      />
-                      {isDirty ? <Tag value="*" severity="warning" /> : <Tag value=" " severity="secondary" />}
-                    </div>
-                  );
-                }}
+                header="Собрано"
+                sortable
+                style={{ minWidth: 120, textAlign: 'right' }}
+                body={(r: OrderDocLineT) => <span className="font-semibold">{fmtNum(r.CollectedQuantity, 2)}</span>}
               />
 
               <Column
                 header="Осталось"
                 sortable
-                style={{ minWidth: 130, textAlign: 'right' }}
+                style={{ minWidth: 120, textAlign: 'right' }}
                 body={(r: OrderDocLineT) => {
                   const open = num(r.OpenQty ?? r.Quantity);
                   const collected = num(r.CollectedQuantity);
                   const remaining = Math.max(open - collected, 0);
-                  return (
-                    <span className={remaining <= 0 && open > 0 ? 'text-green-700 font-semibold' : 'font-semibold'}>
-                      {fmtNum(remaining, 2)}
-                    </span>
-                  );
+                  return <span className={remaining <= 0 && open > 0 ? 'text-green-700 font-semibold' : 'font-semibold'}>{fmtNum(remaining, 2)}</span>;
                 }}
+              />
+              <Column
+                header="Действие"
+                style={{ minWidth: 160 }}
+                body={(r: OrderDocLineT) => (
+                  <Button
+                    label="Собрать"
+                    icon="pi pi-plus"
+                    severity="success"
+                    size="small"
+                    disabled={!connected}
+                    onClick={() => openCollectModal(r)}
+                  />
+                )}
               />
 
               <Column
@@ -606,7 +691,6 @@ export default function SalesOrdersDetailPage() {
 
           <Divider className="my-3" />
 
-          {/* ✅ Pastki umumiy save panel */}
           <div className="flex flex-wrap justify-content-between align-items-center gap-2">
             <div className="flex align-items-center gap-2 flex-wrap">
               <Tag value={`Строк: ${totals.lines}`} />
@@ -614,32 +698,20 @@ export default function SalesOrdersDetailPage() {
               <Tag value={`Собрано: ${fmtNum(totals.collected, 2)}`} severity="success" />
               <Tag value={`Осталось: ${fmtNum(totals.remaining, 2)}`} severity={totals.remaining <= 0 ? 'success' : 'warning'} />
             </div>
-
-            <div className="flex align-items-center gap-2 flex-wrap">
-              <Button
-                label={savingAll ? 'Сохранение...' : `Сохранить изменения (${totals.dirtyCount})`}
-                icon="pi pi-save"
-                severity="success"
-                disabled={!totals.dirtyCount || savingAll || !connected}
-                onClick={saveAll}
-              />
-              <Button
-                label="Сбросить ввод"
-                icon="pi pi-undo"
-                severity="secondary"
-                disabled={!totals.dirtyCount || savingAll}
-                onClick={() => {
-                  // revert inputs to current rows.CollectedQuantity
-                  const next: Record<string, number> = {};
-                  for (const r of rows) next[lineKey(r)] = num(r.CollectedQuantity);
-                  setEditCollected(next);
-                  setDirty({});
-                }}
-              />
-            </div>
           </div>
         </Card>
       </div>
+
+      <CollectAllocationsModal
+        visible={collectOpen}
+        onHide={closeCollectModal}
+        toastRef={toast}
+        socket={socket}
+        connected={connected}
+        DocEntry={Number(DocEntry)}
+        DocNum={Number(DocNum)}
+        line={collectLine}
+      />
     </>
   );
 }

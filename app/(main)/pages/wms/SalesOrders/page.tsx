@@ -32,12 +32,10 @@ type OrderDocT = {
 
   Comments?: string | null;
 
-  // SAP vaqti
-  DocTime?: string | number | null;   // SAP "DocTime"
-  CreateDate?: string | null;         // SAP "CreateDate"
+  DocTime?: string | number | null; 
+  CreateDate?: string | null;   
 
-  // Manager
-  SlpName?: string | null;            // OSLP.SlpName
+  SlpName?: string | null;        
   SlpCode?: number | string | null;
 
   BPLName?: string | null;
@@ -52,7 +50,6 @@ type OrderDocT = {
   Volume?: number | null;
   Weight?: number | null;
 
-  // Mongo time/status
   StartedAt?: string | null;
   FinishedAt?: string | null;
 };
@@ -61,14 +58,12 @@ type OrderDocT = {
 const parseSapDocTimeToHHmm = (v: any) => {
   if (v === null || v === undefined) return null;
 
-  // 935 -> "0935"
   const s = String(v).trim();
   if (!s) return null;
 
   const digits = s.replace(/\D/g, '');
   if (!digits) return null;
 
-  // oxirgi 4 ta raqamni olamiz
   const d4 = digits.padStart(4, '0').slice(-4);
   const hh = d4.slice(0, 2);
   const mm = d4.slice(2, 4);
@@ -83,7 +78,6 @@ const parseSapDocTimeToHHmm = (v: any) => {
 const buildZakazTushganDate = (createDate?: any, docTime?: any) => {
   if (!createDate) return null;
 
-  // CreateDate odatda "YYYY-MM-DD" yoki ISO bo‘ladi
   const base = new Date(createDate);
   if (Number.isNaN(base.getTime())) return null;
 
@@ -361,7 +355,7 @@ export default function OrdersDocsPage() {
         filter: false,
         dataType: 'date',
         style: { minWidth: 180 },
-        body: (r) => (r.AssignedAt ? fmtDateTime(r.AssignedAt) : <span className="text-500">-</span>),
+        body: (r : any) => (r.AssignedAt ? fmtDateTime(r.AssignedAt) : <span className="text-500">-</span>),
       },
       {
         field: 'StartedAt',
@@ -416,11 +410,11 @@ export default function OrdersDocsPage() {
 
   const canAssignWorkArea = selectedWithoutWorkArea.length > 0;
 
-  const selectedDocNumsWithoutWA = useMemo(() => {
-    return selectedWithoutWorkArea
-      .map((r) => Number(r.DocNum))
-      .filter((n) => Number.isFinite(n));
-  }, [selectedWithoutWorkArea]);
+const selectedDocEntriesWithoutWA = useMemo(() => {
+  return selectedWithoutWorkArea
+    .map((r) => Number(r.DocEntry))
+    .filter((n) => Number.isFinite(n) && n > 0);
+}, [selectedWithoutWorkArea]);
 
   const exportExcel = () => {
     const processed = (dtRef.current as any)?.processedData as OrderDocT[] | undefined;
@@ -564,12 +558,10 @@ export default function OrdersDocsPage() {
         <AssignWorkAreaModal
           visible={assignModalOpen}
           onHide={() => setAssignModalOpen(false)}
-          docNums={selectedDocNumsWithoutWA}
+          docNums={selectedDocEntriesWithoutWA}
           DocType="SalesOrder"
-          // workAreaOptionsForModal={workAreaOptionsForModal} 
           onSubmit={async ({ workAreaDocEntry, docNums }) => {
-            // TODO: backend API: assign workarea to orders (ORDR.U_WorkArea)
-            // await api.post('/assignWorkAreaToOrdersApi', { workAreaDocEntry, docNums })
+            await api.post('/updateOrderworkArea', { workAreaDocEntry, docNums })
 
             console.log('ASSIGN_WORKAREA_ORDERS =>', { workAreaDocEntry, docNums });
 
