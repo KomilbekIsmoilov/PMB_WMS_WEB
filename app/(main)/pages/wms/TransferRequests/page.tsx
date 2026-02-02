@@ -703,7 +703,7 @@ const selectedDocEntriesWithoutWA = useMemo(() => {
           DocType="SalesOrder"
           onSubmit={async ({ workAreaDocEntry, docNums }) => {
             try { 
-              await api.post('/updateOrderworkArea', { workAreaDocEntry, docNums })
+              await api.post('/updateTransfersworkArea', { workAreaDocEntry, docNums })
 
             console.log('ASSIGN_WORKAREA_ORDERS =>', { workAreaDocEntry, docNums });
 

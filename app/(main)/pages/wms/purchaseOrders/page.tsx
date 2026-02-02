@@ -303,8 +303,8 @@ const detailHref = React.useCallback((r: PurchaseDocT) => {
     }, [selectedRows]);
 
 const canAssignWorkArea = selectedWithoutWorkArea.length > 0;
-const selectedDocNumsWithoutWA = useMemo(() => {
-return selectedWithoutWorkArea.map((r) => Number(r.DocNum)).filter((n) => Number.isFinite(n));
+const selectedDocEntriesWithoutWA = useMemo(() => {
+return selectedWithoutWorkArea.map((r) => Number(r.DocEntry)).filter((n) => Number.isFinite(n) && n > 0);
 }, [selectedWithoutWorkArea]);
   const totals = useMemo(() => {
     const arr = selectedRows || [];
@@ -429,17 +429,25 @@ return selectedWithoutWorkArea.map((r) => Number(r.DocNum)).filter((n) => Number
         <AssignWorkAreaModal
             visible={assignModalOpen}
             onHide={() => setAssignModalOpen(false)}
-            docNums={selectedDocNumsWithoutWA}
+            docNums={selectedDocEntriesWithoutWA}
             DocType="PurchaseDoc"
-            onSubmit={async ({ workAreaDocEntry, docNums }) => {
-                console.log('ASSIGN_WORKAREA =>', { workAreaDocEntry, docNums });
-
-                toast.current?.show({
-                severity: 'success',
-                summary: 'Готово',
-                detail: 'Назначение выведено в console.log (пока без API)',
-                life: 2500,
-                });
+            onSubmit={async ({ workAreaDocEntry, docNums }) => {try { 
+              await api.post('/updatePurchaseworkAreaApi', { workAreaDocEntry, docNums })
+            toast.current?.show({
+              severity: 'success',
+              summary: 'Готово',
+              detail: 'Назначение выведено в console.log (пока без API)',
+              life: 2500,
+            });
+            } catch (error : any) {
+              console.log('ERROR_ASSIGN_WORKAREA_ORDERS =>', error);
+              toast.current?.show({
+                severity: 'error',
+                summary: 'Ошибка',
+                detail: error.response?.data?.error.error.message.value || 'Не удалось назначить рабочую зону',
+                life: 3500,
+              });
+            }
             }}
             />
       </Card>

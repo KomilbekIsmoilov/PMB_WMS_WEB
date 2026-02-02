@@ -9,6 +9,7 @@ import SapUsersAccessTab from './tabs/SapUsersAccessTab';
 import InspectorAccessTab from './tabs/InspectorAccessTab';
 import CollectorsAccessTab from './tabs/CollectorsAccessTab';
 import WorkAreasTab from './tabs/WorkAreasTab';
+import SettingsAccessTab from './tabs/SettingsAccessTab';
 
 export default function WorkAccessScreen() {
   return (
@@ -24,6 +25,10 @@ export default function WorkAccessScreen() {
 
         <TabPanel header="Сборщики (доступы)">
           <CollectorsAccessTab />
+        </TabPanel>
+
+        <TabPanel header="Настройка (склады и филиалы)">
+          <SettingsAccessTab />
         </TabPanel>
 
         <TabPanel header="Рабочие зоны">

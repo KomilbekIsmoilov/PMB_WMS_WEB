@@ -44,24 +44,12 @@ const AppMenu = () => {
     {
       label: 'Администрирование',
       items: [
-        { label: 'Рабочие зоны (WorkAreas)', icon: 'pi pi-fw pi-sitemap', to: '/access' },
-        { label: 'Пользователи', icon: 'pi pi-fw pi-users', to: '/admin/users' },
-        { label: 'Роли и доступы', icon: 'pi pi-fw pi-shield', to: '/admin/roles' },
-        { label: 'Настройки', icon: 'pi pi-fw pi-cog', to: '/admin/settings' },
+        { label: 'Рабочие зоны (WorkAreas)', icon: 'pi pi-fw pi-sitemap', to: '/access/work-areas' },
+        { label: 'Сборщики', icon: 'pi pi-fw pi-users', to: '/access/collectors' },
+        { label: 'Настройка (склады и филиалы)', icon: 'pi pi-fw pi-cog', to: '/access/settings' },
+        { label: 'Роли и доступы', icon: 'pi pi-fw pi-shield', to: '/access/roles' },
       ],
     },
-
-    {
-      label: 'Справочники',
-      items: [
-        { label: 'Филиалы', icon: 'pi pi-fw pi-building', to: '/admin/branches' },
-        { label: 'Склады', icon: 'pi pi-fw pi-warehouse', to: '/admin/warehouses' },
-        { label: 'Складские места (Bins)', icon: 'pi pi-fw pi-inbox', to: '/admin/bins' },
-        { label: 'Номенклатура', icon: 'pi pi-fw pi-box', to: '/admin/items' },
-        { label: 'Партии (Batches)', icon: 'pi pi-fw pi-tags', to: '/admin/batches' },
-      ],
-    },
-
 
     {
       label: 'Отчетность',

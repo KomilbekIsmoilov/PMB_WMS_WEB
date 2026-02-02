@@ -54,7 +54,7 @@ export type CollectLineT = {
   ItemName?: string | null;
   WhsCode: string;
   Onhand: number | string;
-  OnHandAll :  number | string;
+  OnHandAll? :  number | string;
   WhsName?: string | null;
   Quantity: number | string;
   OpenQty?: number | string;
