@@ -1,4 +1,3 @@
-// src/app/(main)/access/WorkAccessScreen.tsx
 'use client';
 
 import React from 'react';

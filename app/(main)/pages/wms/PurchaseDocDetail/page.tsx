@@ -170,14 +170,23 @@ useEffect(() => {
       }));
 
       setRows(normalized);
-      setEditCollected((prev) => {
-  const next = { ...prev };
-  for (const r of normalized) {
-    const k = lineKey(r);
-    if (next[k] === undefined) next[k] = num(r.CollectedQuantity);
-  }
-  return next;
-});
+      setEditCollected(() => {
+        const next: Record<string, number> = {};
+        for (const r of normalized) {
+          const k = lineKey(r);
+          next[k] = num(r.CollectedQuantity);
+        }
+        return next;
+      });
+      setDirty(() => {
+        const next: Record<string, boolean> = {};
+        for (const r of normalized) {
+          const k = lineKey(r);
+          next[k] = false;
+        }
+        return next;
+      });
+      setSaving({});
     } catch (e: any) {
       toast.current?.show({
         severity: 'error',
@@ -435,27 +444,30 @@ const saveAllDirty = () => {
   );
 
   const getDirtyLines = () => {
-  const list: Array<{ ItemCode: string; WhsCode: string; CollectedQuantity: number }> = [];
+    const list: Array<{ ItemCode: string; WhsCode: string; CollectedQuantity: number }> = [];
 
-  for (const r of rows) {
-    const k = lineKey(r);
-    if (!dirty[k]) continue;
+    for (const r of rows) {
+      const k = lineKey(r);
 
-    const newQty = num(editCollected[k]);
-    const open = num(r.OpenQty ?? r.Quantity);
+      const newQty = num(editCollected[k]);
+      const open = num(r.OpenQty ?? r.Quantity);
+      const current = num(r.CollectedQuantity);
 
-    // validatsiya (xohlasangiz qattiqroq qilamiz)
-    if (newQty < 0 || newQty > open) continue;
+      if (newQty === current) continue;
+      if (!dirty[k] && newQty === current) continue;
 
-    list.push({
-      ItemCode: r.ItemCode,
-      WhsCode: r.WhsCode,
-      CollectedQuantity: newQty,
-    });
-  }
+      // validatsiya (xohlasangiz qattiqroq qilamiz)
+      if (newQty < 0 || newQty > open) continue;
 
-  return list;
-};
+      list.push({
+        ItemCode: r.ItemCode,
+        WhsCode: r.WhsCode,
+        CollectedQuantity: newQty,
+      });
+    }
+
+    return list;
+  };
 
 
 
@@ -597,7 +609,7 @@ const saveAllDirty = () => {
                 const value = editCollected[k] ?? num(r.CollectedQuantity);
 
                 const isSaving = !!saving[k];     
-                const isDirty = !!dirty[k] && value !== num(r.CollectedQuantity);
+                const isDirty = value !== num(r.CollectedQuantity);
 
                 return (
                 <div className="flex align-items-center justify-content-end gap-2">
@@ -609,9 +621,17 @@ const saveAllDirty = () => {
                     onValueChange={(e) => {
                         const v = num(e.value);
                         setEditCollected((p) => ({ ...p, [k]: v }));
-                        setDirty((p) => ({ ...p, [k]: true }));
+                        setDirty((p) => ({ ...p, [k]: v !== num(r.CollectedQuantity) }));
                     }}
                     disabled={isSaving}
+                    />
+                    <Button
+                      icon="pi pi-save"
+                      severity="success"
+                      text
+                      disabled={!connected || !isDirty || isSaving}
+                      onClick={() => saveCollected(r)}
+                      tooltip="РЎРѕС…СЂР°РЅРёС‚СЊ"
                     />
                 </div>
                 );

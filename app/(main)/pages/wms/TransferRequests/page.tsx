@@ -1,4 +1,4 @@
-// src/app/(main)/pages/wms/OrdersDocsPage/page.tsx
+// src/app/(main)/pages/wms/TransferRequests/page.tsx
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -23,15 +23,15 @@ import * as XLSX from 'xlsx';
 import AssignWorkAreaModal, { WorkAreaOptionT } from '../../components/WorkAreaModal';
 
 
-type OrderDocT = {
+type TransferDocT = {
   DocNum: number;
   DocEntry: number;
 
   DocDate?: string | null;
   DocDueDate?: string | null;
 
-  CardCode?: string | null;
-  CardName?: string | null;
+  ToWhsCode?: string | null;
+  ToWhsName?: string | null;
 
   Comments?: string | null;
   AssignedAt?: string | null;
@@ -116,12 +116,12 @@ const toDateObj = (v: any): Date | null => {
 
 
 type ColDef = {
-  field: keyof OrderDocT | 'actions';
+  field: keyof TransferDocT | 'actions';
   header: string;
   sortable?: boolean;
   filter?: boolean;
   style?: React.CSSProperties;
-  body?: (row: OrderDocT) => React.ReactNode;
+  body?: (row: TransferDocT) => React.ReactNode;
   dataType?: 'text' | 'numeric' | 'date';
 };
 
@@ -174,17 +174,18 @@ const stateRowClass = (state?: string | null) => {
   return '';
 };
 
+const API_LIST = '/getTransferDocsApi';
+const API_BULK_STATUS = '/updateTransferRequestsStatusApi';
 
-
-export default function OrdersDocsPage() {
+export default function TransferRequestsPage() {
   const toast = useRef<Toast>(null);
-  const dtRef = useRef<DataTable<OrderDocT[]>>(null);
+  const dtRef = useRef<DataTable<TransferDocT[]>>(null);
 
   const router = useRouter();
 
   const [loading, setLoading] = useState(false);
-  const [rows, setRows] = useState<OrderDocT[]>([]);
-  const [selectedRows, setSelectedRows] = useState<OrderDocT[]>([]);
+  const [rows, setRows] = useState<TransferDocT[]>([]);
+  const [selectedRows, setSelectedRows] = useState<TransferDocT[]>([]);
 
   const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [managerFilter, setManagerFilter] = useState<string | null>(null);
@@ -222,7 +223,7 @@ const bulkSetStatus = async (status: string) => {
   try {
     if (!selectedDocEntries.length) return;
 
-    await api.post('/updateOrdersStatusApi', {
+    await api.post(API_BULK_STATUS, {
       docEntries: selectedDocEntries,
       status,
     });
@@ -261,10 +262,10 @@ const confirmBulkStatus = (status: string) => {
 
 
 
-  const detailHref = React.useCallback((r: OrderDocT) => {
+  const detailHref = React.useCallback((r: TransferDocT) => {
     const docEntry = encodeURIComponent(String(r.DocEntry));
     const docNum = encodeURIComponent(String(r.DocNum));
-    return `/pages/wms/SalesOrdersDetail?DocEntry=${docEntry}&DocNum=${docNum}`;
+    return `/pages/wms/TransferRequestsDetail?DocEntry=${docEntry}&DocNum=${docNum}`;
   }, []);
 
   const [globalFilterValue, setGlobalFilterValue] = useState('');
@@ -273,8 +274,8 @@ const initFilters = (): DataTableFilterMeta => ({
 
   DocNum: { value: null, matchMode: FilterMatchMode.EQUALS },
   DocEntry: { value: null, matchMode: FilterMatchMode.EQUALS },
-  CardCode: { value: null, matchMode: FilterMatchMode.CONTAINS },
-  CardName: { value: null, matchMode: FilterMatchMode.CONTAINS },
+  ToWhsCode: { value: null, matchMode: FilterMatchMode.CONTAINS },
+  ToWhsName: { value: null, matchMode: FilterMatchMode.CONTAINS },
 
   SlpName: { value: null, matchMode: FilterMatchMode.EQUALS },     
   DocDateObj: { value: null, matchMode: FilterMatchMode.DATE_IS },   
@@ -297,8 +298,8 @@ const [filters, setFilters] = useState<DataTableFilterMeta>(initFilters);
   const load = async () => {
     try {
       setLoading(true);
-      const res = await api.get('/getOrdersDocsApi');
-      const data = (res?.data ?? res) as OrderDocT[];
+      const res = await api.get(API_LIST);
+      const data = (res?.data ?? res) as TransferDocT[];
 
       const normalized = (Array.isArray(data) ? data : []).map((r) => ({
         ...r,
@@ -345,8 +346,8 @@ const [filters, setFilters] = useState<DataTableFilterMeta>(initFilters);
         ),
       },
 
-      { field: 'CardCode', header: 'Код клиента', sortable: true, filter: true, dataType: 'text', style: { minWidth: 160 } },
-      { field: 'CardName', header: 'Клиент', sortable: true, filter: true, dataType: 'text', style: { minWidth: 260 } },
+      { field: 'ToWhsCode', header: 'Код склада', sortable: true, filter: true, dataType: 'text', style: { minWidth: 160 } },
+      { field: 'ToWhsName', header: 'Склад назначения', sortable: true, filter: true, dataType: 'text', style: { minWidth: 260 } },
       {
         field: 'SlpName',
         header: 'Менеджер',
@@ -506,14 +507,14 @@ const selectedDocEntriesWithoutWA = useMemo(() => {
 }, [selectedWithoutWorkArea]);
 
   const exportExcel = () => {
-    const processed = (dtRef.current as any)?.processedData as OrderDocT[] | undefined;
+    const processed = (dtRef.current as any)?.processedData as TransferDocT[] | undefined;
     const dataToExport = Array.isArray(processed) ? processed : rows;
 
     const exportRows = dataToExport.map((r) => {
       const out: Record<string, any> = {};
       visibleColumns.forEach((c) => {
         const header = c.header;
-        const field = c.field as keyof OrderDocT;
+        const field = c.field as keyof TransferDocT;
         let v: any = (r as any)[field];
 
         if (field === 'DocDate' || field === 'DocDueDate') v = fmtDate(v);
@@ -528,8 +529,8 @@ const selectedDocEntriesWithoutWA = useMemo(() => {
 
     const ws = XLSX.utils.json_to_sheet(exportRows);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Orders');
-    XLSX.writeFile(wb, `orders_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, 'Transfers');
+    XLSX.writeFile(wb, `transfer_requests_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   const header = (
@@ -627,12 +628,12 @@ const selectedDocEntriesWithoutWA = useMemo(() => {
     <>
       <Toast ref={toast} />
         <ConfirmDialog />
-      <Card title="Открытые заказы">
+      <Card title="Запросы на перемещение">
         <DataTable
           ref={dtRef}
           value={rows}
           loading={loading}
-          onRowDoubleClick={(e) => router.push(detailHref(e.data as OrderDocT))}
+          onRowDoubleClick={(e) => router.push(detailHref(e.data as TransferDocT))}
           dataKey="DocEntry"
           paginator
           rows={20}
@@ -660,8 +661,8 @@ const selectedDocEntriesWithoutWA = useMemo(() => {
             'DocDateObj',
             'DocDueDateObj',
             'DocNum',
-            'CardCode',
-            'CardName',
+            'ToWhsCode',
+            'ToWhsName',
             'Comments',
             'U_State',
             'BPLName',
@@ -671,7 +672,7 @@ const selectedDocEntriesWithoutWA = useMemo(() => {
             ]}
           selectionMode="checkbox"
           selection={selectedRows}
-          onSelectionChange={(e) => setSelectedRows(e.value as OrderDocT[])}
+          onSelectionChange={(e) => setSelectedRows(e.value as TransferDocT[])}
           header={header}
           emptyMessage="Нет данных"
           className="mt-2"

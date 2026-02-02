@@ -64,6 +64,33 @@ const fmtDate = (v: any) => {
   return d.toLocaleDateString('ru-RU');
 };
 
+const normalizeState = (v: any) =>
+  String(v ?? '')
+    .toLowerCase()
+    .trim()
+    .replace(/[’`´]/g, "'")
+    .replace(/\s+/g, ' ');
+
+const stateRowClass = (state?: string | null) => {
+  const s = normalizeState(state);
+  if (!s) return '';
+
+  if (s === "to'liq emas" || s === 'toliq emas' || s.includes("to'liq emas") || s.includes('toliq emas')) return 'bg-red-50';
+  if (
+    s === "yig'ib bo'lingan" ||
+    s === 'yigib bolingan' ||
+    s.includes("yig'ib bo") ||
+    s.includes('yigib bo')
+  )
+    return 'bg-green-50';
+  if (s === "yig'ilmoqda" || s === 'yigilmoqda' || s.includes("yig'ilmo") || s.includes('yigilmo')) return 'bg-yellow-50';
+  if (s === 'yetkazilmoqda' || s.includes('yetkazilmo')) return 'bg-orange-50';
+  if (s === 'yetkazildi' || s.includes('yetkazildi')) return 'bg-teal-50';
+  if (s === 'yangi' || s.includes('yangi')) return 'bg-blue-50';
+
+  return '';
+};
+
 export default function PurchaseDocsPage() {
   const toast = useRef<Toast>(null);
   const dtRef = useRef<DataTable<PurchaseDocT[]>>(null);
@@ -361,6 +388,7 @@ return selectedWithoutWorkArea.map((r) => Number(r.DocNum)).filter((n) => Number
           scrollHeight='570px'
           size='small'
           filters={filters}
+          rowClassName={(r) => stateRowClass(r.U_State)}
           onFilter={(e) => setFilters(e.filters)}
           globalFilterFields={[
             'DocNum',

@@ -24,7 +24,7 @@ const AppMenu = () => {
         { label: 'Заказы на закупку', icon: 'pi pi-fw pi-download', to: '/pages/wms/purchaseOrders' },
         { label: 'Заказы на продажу', icon: 'pi pi-fw pi-truck', to: '/pages/wms/SalesOrders' },
         { label: 'Заявки на возврат', icon: 'pi pi-fw pi-replay', to: '/wms/returns' },
-        { label: 'Запросы на перемещение', icon: 'pi pi-fw pi-arrows-h', to: '/wms/transfer-requests' },
+        { label: 'Запросы на перемещение', icon: 'pi pi-fw pi-arrows-h', to: '/pages/wms/TransferRequests' },
 
         { label: 'Место → Место', icon: 'pi pi-fw pi-exchange', to: '/wms/bin-transfer' },
 
@@ -44,7 +44,7 @@ const AppMenu = () => {
     {
       label: 'Администрирование',
       items: [
-        { label: 'Рабочие зоны (WorkAreas)', icon: 'pi pi-fw pi-sitemap', to: '/admin/work-areas' },
+        { label: 'Рабочие зоны (WorkAreas)', icon: 'pi pi-fw pi-sitemap', to: '/access' },
         { label: 'Пользователи', icon: 'pi pi-fw pi-users', to: '/admin/users' },
         { label: 'Роли и доступы', icon: 'pi pi-fw pi-shield', to: '/admin/roles' },
         { label: 'Настройки', icon: 'pi pi-fw pi-cog', to: '/admin/settings' },

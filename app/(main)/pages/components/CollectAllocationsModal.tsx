@@ -53,6 +53,8 @@ export type CollectLineT = {
   ItemCode: string;
   ItemName?: string | null;
   WhsCode: string;
+  Onhand: number | string;
+  OnHandAll :  number | string;
   WhsName?: string | null;
   Quantity: number | string;
   OpenQty?: number | string;
@@ -245,7 +247,6 @@ export default function CollectAllocationsModal({
     return m;
   }, [onhand]);
 
-  // picked includes saved + local
   const pickedFromKey = useMemo(() => {
     const m = new Map<string, number>();
     const all = [...savedAllocs, ...allocs];
@@ -300,7 +301,6 @@ export default function CollectAllocationsModal({
     return '—';
   };
 
-  // ---------------- loaders ----------------
   const loadCollectors = async () => {
     if (!DocEntry) return;
     try {

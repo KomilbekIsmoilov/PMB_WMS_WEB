@@ -1,4 +1,4 @@
-// src/app/(main)/pages/wms/SalesOrdersDetail/page.tsx
+// src/app/(main)/pages/wms/TransferRequestsDetail/page.tsx
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -26,6 +26,8 @@ const safeInt = (v: any, def = 0) => {
   return Number.isFinite(n) ? n : def;
 };
 
+const API_LINES = '/getTransferDocsItemsApi';
+
 type UserStampT = {
   empID?: number;
   userId?: string;
@@ -49,14 +51,14 @@ type PickDetailT = {
   UpdatedAt?: string | Date | null;
 };
 
-type OrderDocLineT = {
+type TransferDocLineT = {
   DocNum: number;
   DocEntry: number;
   DocStatus?: string | null;
   DocDate?: string | null;
   DocDueDate?: string | null;
-  CardCode?: string | null;
-  CardName?: string | null;
+  ToWhsCode?: string | null;
+  ToWhsName?: string | null;
   Comments?: string | null;
   DocTime?: string | number | null;
   CreateDate?: string | null;
@@ -130,7 +132,7 @@ function buildDocCreatedAt(createDate?: any, docTime?: any) {
   return t ? `${cd}T${t}` : cd;
 }
 
-export default function SalesOrdersDetailPage() {
+export default function TransferRequestsDetailPage() {
   // -------- modal state --------
   const [collectOpen, setCollectOpen] = useState(false);
   const [collectLine, setCollectLine] = useState<CollectLineT | null>(null);
@@ -159,7 +161,7 @@ export default function SalesOrdersDetailPage() {
   useEffect(() => setMounted(true), []);
 
   const [loading, setLoading] = useState(false);
-  const [rows, setRows] = useState<OrderDocLineT[]>([]);
+  const [rows, setRows] = useState<TransferDocLineT[]>([]);
 
   const [globalFilterValue, setGlobalFilterValue] = useState('');
   const [filters, setFilters] = useState<DataTableFilterMeta>({
@@ -179,7 +181,7 @@ export default function SalesOrdersDetailPage() {
   const makeUiKey = useCallback((line: any) => lineKey(line), [lineKey]);
 
   const patchOrInsertRow = useCallback(
-    (prev: OrderDocLineT[], rawLine: any) => {
+    (prev: TransferDocLineT[], rawLine: any) => {
       if (!rawLine) return prev;
 
       const k = makeUiKey(rawLine);
@@ -187,14 +189,14 @@ export default function SalesOrdersDetailPage() {
 
       const header = prev?.[0] || null;
 
-      const filled: OrderDocLineT = {
+      const filled: TransferDocLineT = {
         DocEntry: safeInt(rawLine.DocEntry ?? header?.DocEntry ?? DocEntry, 0),
         DocNum: safeInt(rawLine.DocNum ?? header?.DocNum ?? DocNum, 0),
         DocStatus: rawLine.DocStatus ?? header?.DocStatus,
         DocDate: rawLine.DocDate ?? header?.DocDate,
         DocDueDate: rawLine.DocDueDate ?? header?.DocDueDate,
-        CardCode: rawLine.CardCode ?? header?.CardCode,
-        CardName: rawLine.CardName ?? header?.CardName,
+        ToWhsCode: rawLine.ToWhsCode ?? header?.ToWhsCode,
+        ToWhsName: rawLine.ToWhsName ?? header?.ToWhsName,
         Comments: rawLine.Comments ?? header?.Comments,
         DocTime: rawLine.DocTime ?? header?.DocTime,
         CreateDate: rawLine.CreateDate ?? header?.CreateDate,
@@ -224,7 +226,7 @@ export default function SalesOrdersDetailPage() {
 
       if (idx >= 0) {
         const cur = prev[idx];
-        const next: OrderDocLineT = {
+        const next: TransferDocLineT = {
           ...cur,
           ...filled,
           uiKey: cur.uiKey || k,
@@ -243,7 +245,7 @@ export default function SalesOrdersDetailPage() {
   );
 
   const removeRowByPayload = useCallback(
-    (prev: OrderDocLineT[], p: any) => {
+    (prev: TransferDocLineT[], p: any) => {
       const line = p?.Line || p?.line || null;
       const ln = line?.LineNum ?? p?.LineNum;
       const item = normStr(line?.ItemCode ?? p?.ItemCode);
@@ -269,8 +271,8 @@ export default function SalesOrdersDetailPage() {
       DocEntry: r.DocEntry ?? Number(DocEntry),
       DocDate: r.DocDate,
       DocDueDate: r.DocDueDate,
-      CardCode: r.CardCode,
-      CardName: r.CardName,
+      ToWhsCode: r.ToWhsCode,
+      ToWhsName: r.ToWhsName,
       SlpName: r.SlpName,
       WorkAreaName: r.U_WorkAreaName,
       BPLName: r.BPLName,
@@ -312,7 +314,7 @@ export default function SalesOrdersDetailPage() {
       }
       setLoading(true);
 
-      const res = await api.get('/getOrdersDocsItemsApi', {
+      const res = await api.get(API_LINES, {
         params: {
           DocEntry,
           DocNum,
@@ -320,7 +322,7 @@ export default function SalesOrdersDetailPage() {
         },
       });
 
-      const data = (res?.data ?? res) as OrderDocLineT[];
+      const data = (res?.data ?? res) as TransferDocLineT[];
       console.log(data)
 
       const normalized = (Array.isArray(data) ? data : []).map((r) => {
@@ -333,7 +335,7 @@ export default function SalesOrdersDetailPage() {
       toast.current?.show({
         severity: 'error',
         summary: 'Ошибка',
-        detail: e?.response?.data?.message || 'Не удалось загрузить заказ',
+        detail: e?.response?.data?.message || 'Не удалось загрузить запрос',
         life: 3500,
       });
     } finally {
@@ -394,7 +396,7 @@ export default function SalesOrdersDetailPage() {
     };
   }, [socket, patchOrInsertRow, removeRowByPayload, load]);
 
-  const rowClassName = (r: OrderDocLineT) => {
+  const rowClassName = (r: TransferDocLineT) => {
     const open = num(r.OpenQty ?? r.Quantity);
     const col = num(r.CollectedQuantity);
     if (open > 0 && col >= open) return 'bg-green-50';
@@ -418,7 +420,7 @@ export default function SalesOrdersDetailPage() {
     });
   }, [selectedRows]);
 
-  const buildLineRef = (r: OrderDocLineT) => ({
+  const buildLineRef = (r: TransferDocLineT) => ({
     LineNum: r.LineNum ?? null,
     ItemCode: r.ItemCode,
     WhsCode: r.WhsCode,
@@ -495,7 +497,7 @@ export default function SalesOrdersDetailPage() {
     });
   }, [selectedRows.length, doSendToSap, sendingToSap]);
 
-  const progressBody = (r: OrderDocLineT) => {
+  const progressBody = (r: TransferDocLineT) => {
     const open = Math.max(num(r.OpenQty ?? r.Quantity), 0);
     const collected = Math.max(num(r.CollectedQuantity), 0);
     const pct = open > 0 ? clamp((collected / open) * 100) : 0;
@@ -513,7 +515,7 @@ export default function SalesOrdersDetailPage() {
     );
   };
 
-  const openCollectModal = (r: OrderDocLineT) => {
+  const openCollectModal = (r: TransferDocLineT) => {
     const k = lineKey(r);
     setCollectKey(k);
 
@@ -624,10 +626,10 @@ export default function SalesOrdersDetailPage() {
           title={
             <div className="flex flex-column gap-1">
               <div className="flex align-items-center gap-2 flex-wrap">
-                <span className="text-xl font-semibold">Заказ № {headerInfo?.DocNum ?? DocNum ?? '-'}</span>
+                <span className="text-xl font-semibold">Перемещение № {headerInfo?.DocNum ?? DocNum ?? '-'}</span>
               </div>
               <div className="text-600">
-                {headerInfo ? `${headerInfo.CardCode || ''} • ${headerInfo.CardName || ''}` : 'Загрузка данных...'}
+                {headerInfo ? `${headerInfo.ToWhsCode || ''} • ${headerInfo.ToWhsName || ''}` : 'Загрузка данных...'}
               </div>
             </div>
           }
@@ -650,7 +652,7 @@ export default function SalesOrdersDetailPage() {
               <div className="text-600 text-sm">Зона</div>
               <div className="font-semibold">{headerInfo?.WorkAreaName || '-'}</div>
               <div className="text-500 text-sm">
-                Заказ получен: {headerInfo?.createdIso ? fmtDateTime(headerInfo.createdIso) : '-'}
+                Запрос создан: {headerInfo?.createdIso ? fmtDateTime(headerInfo.createdIso) : '-'}
               </div>
             </div>
           </div>
@@ -704,21 +706,21 @@ export default function SalesOrdersDetailPage() {
               globalFilterFields={['ItemCode', 'ItemName', 'WhsCode', 'WhsName']}
               selection={selectedRows as any}
               onSelectionChange={(e) => {
-                const arr = Array.isArray(e.value) ? (e.value as OrderDocLineT[]) : [];
+                const arr = Array.isArray(e.value) ? (e.value as TransferDocLineT[]) : [];
                 setSelectedLineKeys(arr.map((x) => x.uiKey || lineKey(x)));
               }}
               metaKeySelection={false}
             >
               <Column selectionMode="multiple" headerStyle={{ width: '3rem' }} />
 
-              <Column header="#" style={{ width: 70 }} body={(r: OrderDocLineT) => (r.LineNum != null ? r.LineNum : '-')} />
+              <Column header="#" style={{ width: 70 }} body={(r: TransferDocLineT) => (r.LineNum != null ? r.LineNum : '-')} />
               <Column field="ItemCode" header="Код" sortable style={{ minWidth: 140 }} />
               <Column field="ItemName" header="Товар" sortable style={{ minWidth: 320 }} />
 
               <Column
                 header="Склад"
                 style={{ minWidth: 220 }}
-                body={(r: OrderDocLineT) => (
+                body={(r: TransferDocLineT) => (
                   <div className="flex flex-column">
                     <span className="font-medium">{r.WhsName || r.WhsCode}</span>
                     <span className="text-500 text-sm">{r.WhsCode}</span>
@@ -730,7 +732,7 @@ export default function SalesOrdersDetailPage() {
                 header="OpenQty"
                 sortable
                 style={{ minWidth: 120, textAlign: 'right' }}
-                body={(r: OrderDocLineT) => <span className="font-semibold">{fmtNum(r.OpenQty ?? r.Quantity, 2)}</span>}
+                body={(r: TransferDocLineT) => <span className="font-semibold">{fmtNum(r.OpenQty ?? r.Quantity, 2)}</span>}
               />
 
               <Column header="Прогресс" style={{ minWidth: 220 }} body={progressBody} />
@@ -739,14 +741,14 @@ export default function SalesOrdersDetailPage() {
                 header="Собрано"
                 sortable
                 style={{ minWidth: 120, textAlign: 'right' }}
-                body={(r: OrderDocLineT) => <span className="font-semibold">{fmtNum(r.CollectedQuantity, 2)}</span>}
+                body={(r: TransferDocLineT) => <span className="font-semibold">{fmtNum(r.CollectedQuantity, 2)}</span>}
               />
 
               <Column
                 header="Осталось"
                 sortable
                 style={{ minWidth: 120, textAlign: 'right' }}
-                body={(r: OrderDocLineT) => {
+                body={(r: TransferDocLineT) => {
                   const open = num(r.OpenQty ?? r.Quantity);
                   const collected = num(r.CollectedQuantity);
                   const remaining = Math.max(open - collected, 0);
@@ -761,7 +763,7 @@ export default function SalesOrdersDetailPage() {
               <Column
                 header="Действие"
                 style={{ minWidth: 160 }}
-                body={(r: OrderDocLineT) => (
+                body={(r: TransferDocLineT) => (
                   <Button
                     label="Собрать"
                     icon="pi pi-plus"
@@ -778,7 +780,7 @@ export default function SalesOrdersDetailPage() {
                 header="Сборов"
                 sortable
                 style={{ minWidth: 110, textAlign: 'right' }}
-                body={(r: OrderDocLineT) => fmtNum(r.CollectedCount, 0)}
+                body={(r: TransferDocLineT) => fmtNum(r.CollectedCount, 0)}
               />
             </DataTable>
           </div>
