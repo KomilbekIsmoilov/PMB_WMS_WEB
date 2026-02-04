@@ -87,7 +87,7 @@ const buildZakazTushganDate = (createDate?: any, docTime?: any) => {
   if (Number.isNaN(base.getTime())) return null;
 
   const hhmm = parseSapDocTimeToHHmm(docTime);
-  if (!hhmm) return base; // time yo'q bo'lsa faqat sanani ko'rsatamiz
+  if (!hhmm) return base; 
 
   const [hh, mm] = hhmm.split(':').map((x) => Number(x));
   const d = new Date(base);
@@ -104,8 +104,22 @@ const fmtDuration = (ms: number) => {
   return `${h} ч ${m} мин`;
 };
 
+const normalizeDateValue = (v: any) => {
+  if (v === null || v === undefined || v === '') return null;
+  if (v instanceof Date) return v;
+  if (typeof v === 'string' || typeof v === 'number') return v;
+  if (typeof v === 'object') {
+    const anyV = v as any;
+    if (anyV.$date) return anyV.$date;
+    if (anyV.$numberLong) return Number(anyV.$numberLong);
+    if (anyV.date) return anyV.date;
+  }
+  return v;
+};
+
 const toDateObj = (v: any): Date | null => {
-  const s = String(v ?? '').trim();
+  const raw = normalizeDateValue(v);
+  const s = String(raw ?? '').trim();
   if (!s) return null;
 
   const iso = /^\d{4}-\d{2}-\d{2}$/.test(s) ? `${s}T00:00:00` : s;
@@ -134,15 +148,18 @@ const fmtNum = (v: any, digits = 2) =>
   new Intl.NumberFormat('ru-RU', { maximumFractionDigits: digits, minimumFractionDigits: 0 }).format(num(v));
 
 const fmtDate = (v: any) => {
-  if (!v) return '';
-  const d = new Date(v);
+  const raw = normalizeDateValue(v);
+  if (!raw) return '';
+  const d = new Date(raw);
   if (Number.isNaN(d.getTime())) return String(v);
   return d.toLocaleDateString('ru-RU');
 };
 
 const fmtDateTime = (v: any) => {
-  if (!v) return '';
-  const d = new Date(v);
+  console.log('fmtDateTime input:', v);
+  const raw = normalizeDateValue(v);
+  if (!raw) return '';
+  const d = new Date(raw);
   if (Number.isNaN(d.getTime())) return String(v);
   return d.toLocaleString('ru-RU');
 };
@@ -222,7 +239,7 @@ const bulkSetStatus = async (status: string) => {
   try {
     if (!selectedDocEntries.length) return;
 
-    await api.post('/updateOrdersStatusApi', {
+    await api.post('/updateOrderworkArea', {
       docEntries: selectedDocEntries,
       status,
     });
@@ -304,6 +321,9 @@ const [filters, setFilters] = useState<DataTableFilterMeta>(initFilters);
         ...r,
         DocDateObj: toDateObj(r.DocDate),
         DocDueDateObj: toDateObj(r.DocDueDate),
+        AssignedAt: normalizeDateValue(r.AssignedAt),
+        StartedAt: normalizeDateValue(r.StartedAt),
+        FinishedAt: normalizeDateValue(r.FinishedAt),
       }));
 
       setRows(normalized);
@@ -391,31 +411,31 @@ const [filters, setFilters] = useState<DataTableFilterMeta>(initFilters);
       { field: 'BPLName', header: 'Филиал (BPL)', sortable: true, filter: true, dataType: 'text', style: { minWidth: 200 } },
       {
         field: 'U_State',
-        header: 'State',
+        header: 'Статус',
         sortable: true,
         filter: true,
         dataType: 'text',
         style: { minWidth: 160 },
         body: (r) => (r.U_State ? <Tag value={String(r.U_State)} /> : <Tag value="-" severity="secondary" />),
       },
-      {
-        field: 'U_Checker',
-        header: 'Checker',
-        sortable: true,
-        filter: false,
-        dataType: 'text',
-        style: { minWidth: 220 },
-        body: (r) => {
-          const name = `${String(r.lastName || '').trim()} ${String(r.firstName || '').trim()}`.trim();
-          const emp = String(r.U_Checker || '').trim();
-          if (!name && !emp) return <span className="text-500">-</span>;
-          return (
-            <div className="flex flex-column">
-              <span className="font-medium">{name || '-'}</span>
-            </div>
-          );
-        },
-      },
+      // {
+      //   field: 'U_Checker',
+      //   header: 'Checker',
+      //   sortable: true,
+      //   filter: false,
+      //   dataType: 'text',
+      //   style: { minWidth: 220 },
+      //   body: (r) => {
+      //     const name = `${String(r.lastName || '').trim()} ${String(r.firstName || '').trim()}`.trim();
+      //     const emp = String(r.U_Checker || '').trim();
+      //     if (!name && !emp) return <span className="text-500">-</span>;
+      //     return (
+      //       <div className="flex flex-column">
+      //         <span className="font-medium">{name || '-'}</span>
+      //       </div>
+      //     );
+      //   },
+      // },
       { field: 'U_WorkAreaName', header: 'Зона', sortable: true, filter: true, dataType: 'text', style: { minWidth: 220 } },
       { field: 'Comments', header: 'Комментарий', sortable: true, filter: true, dataType: 'text', style: { minWidth: 280 } },
       {

@@ -6,7 +6,7 @@ import { getSocket } from './socketClient';
 
 type JoinAck = { ok: boolean; room?: string; message?: string };
 
-export function usePurchaseDocRoom(docEntry?: number | string | null) {
+export function useBinToBinRoom(docKey?: number | string | null) {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [connected, setConnected] = useState(false);
   const [room, setRoom] = useState<string | null>(null);
@@ -54,13 +54,21 @@ export function usePurchaseDocRoom(docEntry?: number | string | null) {
 
     setError(null);
 
-    const id = Number(docEntry);
-    if (!Number.isFinite(id) || id <= 0) {
+    const raw = docKey != null ? String(docKey).trim() : '';
+    const idNum = Number(raw);
+    const payload =
+      raw && Number.isFinite(idNum) && idNum > 0
+        ? { DocEntry: idNum }
+        : raw
+        ? { id: raw }
+        : null;
+
+    if (!payload) {
       setRoom(null);
       return;
     }
 
-    socket.emit('purchaseDoc:join', { DocEntry: id }, (ack: JoinAck) => {
+    socket.emit('binToBin:join', payload, (ack: JoinAck) => {
       if (!ack?.ok) {
         setError(ack?.message || 'Join error');
         setRoom(null);
@@ -70,10 +78,9 @@ export function usePurchaseDocRoom(docEntry?: number | string | null) {
     });
 
     return () => {
-      socket.emit('purchaseDoc:leave', (ack: any) => {
-      });
+      socket.emit('binToBin:leave', payload, () => {});
     };
-  }, [socket, docEntry]);
+  }, [socket, docKey]);
 
   return useMemo(() => ({ socket, connected, room, error }), [socket, connected, room, error]);
 }

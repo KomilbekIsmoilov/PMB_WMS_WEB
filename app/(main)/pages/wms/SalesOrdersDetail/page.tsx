@@ -1,4 +1,4 @@
-// src/app/(main)/pages/wms/SalesOrdersDetail/page.tsx
+﻿// src/app/(main)/pages/wms/SalesOrdersDetail/page.tsx
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -20,6 +20,7 @@ import api from '@/app/api/api';
 import { useOrderPickRoom } from '@/app/socket/useOrderPickRoom';
 
 import CollectAllocationsModal, { CollectLineT } from '../../components/CollectAllocationsModal';
+import ItemsPickerModal, { PickedItemT } from '../../components/ItemsPickerModal';
 
 const safeInt = (v: any, def = 0) => {
   const n = Number(v);
@@ -62,6 +63,7 @@ type OrderDocLineT = {
   CreateDate?: string | null;
   BPLName?: string | null;
   U_State?: string | null;
+  U_WorkArea?: number | null;
   U_WorkAreaName?: string | null;
   SlpName?: string | null;
 
@@ -135,7 +137,7 @@ export default function SalesOrdersDetailPage() {
   const [collectOpen, setCollectOpen] = useState(false);
   const [collectLine, setCollectLine] = useState<CollectLineT | null>(null);
   const [collectKey, setCollectKey] = useState<string | null>(null);
-
+  const [itemsModalOpen, setItemsModalOpen] = useState(false);
   const toast = useRef<Toast>(null);
   const router = useRouter();
   const sp = useSearchParams();
@@ -200,6 +202,7 @@ export default function SalesOrdersDetailPage() {
         CreateDate: rawLine.CreateDate ?? header?.CreateDate,
         BPLName: rawLine.BPLName ?? header?.BPLName,
         U_State: rawLine.U_State ?? header?.U_State,
+        U_WorkArea: rawLine.U_WorkArea ?? header?.U_WorkArea,
         U_WorkAreaName: rawLine.U_WorkAreaName ?? header?.U_WorkAreaName,
         SlpName: rawLine.SlpName ?? header?.SlpName,
 
@@ -277,6 +280,7 @@ export default function SalesOrdersDetailPage() {
       createdIso,
       Comments: r.Comments,
       U_State: r.U_State,
+      U_WorkArea: r.U_WorkArea,
       DocStatus: r.DocStatus,
     };
   }, [rows, DocNum, DocEntry]);
@@ -495,6 +499,56 @@ export default function SalesOrdersDetailPage() {
     });
   }, [selectedRows.length, doSendToSap, sendingToSap]);
 
+  const addItems = async (items: PickedItemT[]) => {
+    await api.post('/postSalesOrderAddItemsApi', {
+      DocEntry: docEntryNum,
+      DocNum: safeInt(DocNum, 0),
+      Items: items,
+    });
+
+    toast.current?.show({
+      severity: 'success',
+      summary: 'Готово',
+      detail: `Добавлено: ${items.length}`,
+      life: 2500,
+    });
+
+    await load();
+  };
+
+  const deleteLine = async (r: OrderDocLineT) => {
+    try {
+      await api.post('/deleteSalesOrderLineApi', {
+        DocEntry: docEntryNum,
+        DocNum: safeInt(DocNum, 0),
+        LineNum: r.LineNum ?? null,
+        ItemCode: r.ItemCode,
+        WhsCode: r.WhsCode,
+      });
+
+      setRows((prev) => prev.filter((x) => lineKey(x) !== lineKey(r)));
+      toast.current?.show({ severity: 'success', summary: 'Удалено', detail: r.ItemCode, life: 2000 });
+    } catch (e: any) {
+      toast.current?.show({
+        severity: 'error',
+        summary: 'Ошибка',
+        detail: e?.response?.data?.message || 'Не удалось удалить строку',
+        life: 3500,
+      });
+    }
+  };
+
+  const confirmDelete = (r: OrderDocLineT) => {
+    confirmDialog({
+      header: 'Удалить товар?',
+      icon: 'pi pi-exclamation-triangle',
+      message: `Удалить ${r.ItemCode} ${r.ItemName || ''}?`,
+      acceptLabel: 'Удалить',
+      rejectLabel: 'Отмена',
+      acceptClassName: 'p-button-danger',
+      accept: () => deleteLine(r),
+    });
+  };
   const progressBody = (r: OrderDocLineT) => {
     const open = Math.max(num(r.OpenQty ?? r.Quantity), 0);
     const collected = Math.max(num(r.CollectedQuantity), 0);
@@ -595,6 +649,8 @@ export default function SalesOrdersDetailPage() {
               disabled={loading}
               onClick={load}
             />
+
+            <Button label="Добавить товары" icon="pi pi-plus" onClick={() => setItemsModalOpen(true)} />
 
             {docStatusTag}
           </div>
@@ -727,14 +783,25 @@ export default function SalesOrdersDetailPage() {
               />
 
               <Column
-                header="OpenQty"
+                header="Кол-во"
                 sortable
                 style={{ minWidth: 120, textAlign: 'right' }}
                 body={(r: OrderDocLineT) => <span className="font-semibold">{fmtNum(r.OpenQty ?? r.Quantity, 2)}</span>}
               />
 
               <Column header="Прогресс" style={{ minWidth: 220 }} body={progressBody} />
-
+                <Column
+                header="На складе"
+                sortable
+                style={{ minWidth: 120, textAlign: 'right' }}
+                body={(r: OrderDocLineT) => <span className="font-semibold">{fmtNum(r.OnHand, 2)}</span>}
+              />
+               <Column
+                header="Всего на складе"
+                sortable
+                style={{ minWidth: 120, textAlign: 'right' }}
+                body={(r: OrderDocLineT) => <span className="font-semibold">{fmtNum(r.OnHandAll, 2)}</span>}
+              />
               <Column
                 header="Собрано"
                 sortable
@@ -780,6 +847,13 @@ export default function SalesOrdersDetailPage() {
                 style={{ minWidth: 110, textAlign: 'right' }}
                 body={(r: OrderDocLineT) => fmtNum(r.CollectedCount, 0)}
               />
+              <Column
+                header=""
+                style={{ width: 70 }}
+                body={(r: OrderDocLineT) => (
+                  <Button icon="pi pi-trash" severity="danger" text onClick={() => confirmDelete(r)} />
+                )}
+              />
             </DataTable>
           </div>
 
@@ -799,6 +873,14 @@ export default function SalesOrdersDetailPage() {
         </Card>
       </div>
 
+      <ItemsPickerModal
+        visible={itemsModalOpen}
+        onHide={() => setItemsModalOpen(false)}
+        endpoint="/getItemsForSalesOrderApi"
+        params={{ DocEntry, DocNum }}
+        onSubmit={addItems}
+      />
+
       <CollectAllocationsModal
         visible={collectOpen}
         onHide={closeCollectModal}
@@ -807,8 +889,15 @@ export default function SalesOrdersDetailPage() {
         connected={connected}
         DocEntry={Number(DocEntry)}
         DocNum={Number(DocNum)}
+        WorkAreaDocEntry={headerInfo?.U_WorkArea ?? null}
         line={collectLine}
       />
     </>
   );
 }
+
+
+
+
+
+

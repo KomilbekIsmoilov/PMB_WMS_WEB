@@ -1,4 +1,4 @@
-/* eslint-disable @next/next/no-img-element */
+﻿/* eslint-disable @next/next/no-img-element */
 
 import React, { useContext } from 'react';
 import AppMenuitem from './AppMenuitem';
@@ -10,12 +10,9 @@ const AppMenu = () => {
   const { layoutConfig } = useContext(LayoutContext);
 
   const model: AppMenuItem[] = [
-
     {
       label: 'Главная',
-      items: [
-        { label: 'Dashboard', icon: 'pi pi-fw pi-home', to: '/' },
-      ],
+      items: [{ label: 'Dashboard', icon: 'pi pi-fw pi-home', to: '/pages/dashboard' }],
     },
 
     {
@@ -23,21 +20,17 @@ const AppMenu = () => {
       items: [
         { label: 'Заказы на закупку', icon: 'pi pi-fw pi-download', to: '/pages/wms/purchaseOrders' },
         { label: 'Заказы на продажу', icon: 'pi pi-fw pi-truck', to: '/pages/wms/SalesOrders' },
-        { label: 'Заявки на возврат', icon: 'pi pi-fw pi-replay', to: '/wms/returns' },
         { label: 'Запросы на перемещение', icon: 'pi pi-fw pi-arrows-h', to: '/pages/wms/TransferRequests' },
-
         { label: 'Место → Место', icon: 'pi pi-fw pi-exchange', to: '/wms/bin-transfer' },
-
-        { label: 'Журнал операций', icon: 'pi pi-fw pi-history', to: '/wms/operations-log' },
+        // { label: 'Возвраты', icon: 'pi pi-fw pi-replay', to: '/wms/returns' },
+        { label: 'Доставка', icon: 'pi pi-fw pi-truck', to: '/wms/delivery-docs' },
       ],
     },
-
 
     {
       label: 'Документы',
       items: [
-        { label: 'Черновики / В работе', icon: 'pi pi-fw pi-book', to: '/wms/drafts' },
-        { label: 'Завершенные', icon: 'pi pi-fw pi-check-circle', to: '/wms/completed' },
+        { label: 'Архив закупок', icon: 'pi pi-fw pi-briefcase', to: '/wms/purchase-archive' },
       ],
     },
 
@@ -55,7 +48,8 @@ const AppMenu = () => {
       label: 'Отчетность',
       items: [
         { label: 'Эффективность сборщиков', icon: 'pi pi-fw pi-chart-line', to: '/reports/pickers' },
-        { label: 'Движение по складу', icon: 'pi pi-fw pi-chart-bar', to: '/reports/warehouse-movements' },
+        { label: 'История сборов (лог)', icon: 'pi pi-fw pi-list', to: '/reports/pick-history' },
+        // { label: 'Движение по складу', icon: 'pi pi-fw pi-chart-bar', to: '/reports/warehouse-movements' },
       ],
     },
   ];

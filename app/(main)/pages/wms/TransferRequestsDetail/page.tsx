@@ -1,4 +1,4 @@
-// src/app/(main)/pages/wms/TransferRequestsDetail/page.tsx
+﻿// src/app/(main)/pages/wms/TransferRequestsDetail/page.tsx
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -20,6 +20,7 @@ import api from '@/app/api/api';
 import { useOrderPickRoom } from '@/app/socket/useOrderPickRoom';
 
 import CollectAllocationsModal, { CollectLineT } from '../../components/CollectAllocationsModal';
+import ItemsPickerModal, { PickedItemT } from '../../components/ItemsPickerModal';
 
 const safeInt = (v: any, def = 0) => {
   const n = Number(v);
@@ -64,6 +65,7 @@ type TransferDocLineT = {
   CreateDate?: string | null;
   BPLName?: string | null;
   U_State?: string | null;
+  U_WorkArea?: number | null;
   U_WorkAreaName?: string | null;
   SlpName?: string | null;
 
@@ -137,7 +139,7 @@ export default function TransferRequestsDetailPage() {
   const [collectOpen, setCollectOpen] = useState(false);
   const [collectLine, setCollectLine] = useState<CollectLineT | null>(null);
   const [collectKey, setCollectKey] = useState<string | null>(null);
-
+  const [itemsModalOpen, setItemsModalOpen] = useState(false);
   const toast = useRef<Toast>(null);
   const router = useRouter();
   const sp = useSearchParams();
@@ -202,6 +204,7 @@ export default function TransferRequestsDetailPage() {
         CreateDate: rawLine.CreateDate ?? header?.CreateDate,
         BPLName: rawLine.BPLName ?? header?.BPLName,
         U_State: rawLine.U_State ?? header?.U_State,
+        U_WorkArea: rawLine.U_WorkArea ?? header?.U_WorkArea,
         U_WorkAreaName: rawLine.U_WorkAreaName ?? header?.U_WorkAreaName,
         SlpName: rawLine.SlpName ?? header?.SlpName,
 
@@ -279,6 +282,7 @@ export default function TransferRequestsDetailPage() {
       createdIso,
       Comments: r.Comments,
       U_State: r.U_State,
+      U_WorkArea: r.U_WorkArea,
       DocStatus: r.DocStatus,
     };
   }, [rows, DocNum, DocEntry]);
@@ -497,6 +501,56 @@ export default function TransferRequestsDetailPage() {
     });
   }, [selectedRows.length, doSendToSap, sendingToSap]);
 
+  const addItems = async (items: PickedItemT[]) => {
+    await api.post('/postTransferDocAddItemsApi', {
+      DocEntry: docEntryNum,
+      DocNum: safeInt(DocNum, 0),
+      Items: items,
+    });
+
+    toast.current?.show({
+      severity: 'success',
+      summary: 'Готово',
+      detail: `Добавлено: ${items.length}`,
+      life: 2500,
+    });
+
+    await load();
+  };
+
+  const deleteLine = async (r: TransferDocLineT) => {
+    try {
+      await api.post('/deleteTransferDocLineApi', {
+        DocEntry: docEntryNum,
+        DocNum: safeInt(DocNum, 0),
+        LineNum: r.LineNum ?? null,
+        ItemCode: r.ItemCode,
+        WhsCode: r.WhsCode,
+      });
+
+      setRows((prev) => prev.filter((x) => lineKey(x) !== lineKey(r)));
+      toast.current?.show({ severity: 'success', summary: 'Удалено', detail: r.ItemCode, life: 2000 });
+    } catch (e: any) {
+      toast.current?.show({
+        severity: 'error',
+        summary: 'Ошибка',
+        detail: e?.response?.data?.message || 'Не удалось удалить строку',
+        life: 3500,
+      });
+    }
+  };
+
+  const confirmDelete = (r: TransferDocLineT) => {
+    confirmDialog({
+      header: 'Удалить товар?',
+      icon: 'pi pi-exclamation-triangle',
+      message: `Удалить ${r.ItemCode} ${r.ItemName || ''}?`,
+      acceptLabel: 'Удалить',
+      rejectLabel: 'Отмена',
+      acceptClassName: 'p-button-danger',
+      accept: () => deleteLine(r),
+    });
+  };
   const progressBody = (r: TransferDocLineT) => {
     const open = Math.max(num(r.OpenQty ?? r.Quantity), 0);
     const collected = Math.max(num(r.CollectedQuantity), 0);
@@ -598,6 +652,8 @@ export default function TransferRequestsDetailPage() {
               onClick={load}
             />
 
+            <Button label="Добавить товары" icon="pi pi-plus" onClick={() => setItemsModalOpen(true)} />
+
             {docStatusTag}
           </div>
 
@@ -636,7 +692,7 @@ export default function TransferRequestsDetailPage() {
         >
           <div className="grid">
             <div className="col-12 md:col-3">
-              <div className="text-600 text-sm">Дата</div>
+              <div className="text-600 text-sm">Р”Р°С‚Р°</div>
               <div className="font-semibold">{fmtDate(headerInfo?.DocDate)}</div>
             </div>
             <div className="col-12 md:col-3">
@@ -782,6 +838,13 @@ export default function TransferRequestsDetailPage() {
                 style={{ minWidth: 110, textAlign: 'right' }}
                 body={(r: TransferDocLineT) => fmtNum(r.CollectedCount, 0)}
               />
+              <Column
+                header=""
+                style={{ width: 70 }}
+                body={(r: TransferDocLineT) => (
+                  <Button icon="pi pi-trash" severity="danger" text onClick={() => confirmDelete(r)} />
+                )}
+              />
             </DataTable>
           </div>
 
@@ -801,6 +864,14 @@ export default function TransferRequestsDetailPage() {
         </Card>
       </div>
 
+      <ItemsPickerModal
+        visible={itemsModalOpen}
+        onHide={() => setItemsModalOpen(false)}
+        endpoint="/getItemsForTransferDocApi"
+        params={{ DocEntry, DocNum }}
+        onSubmit={addItems}
+      />
+
       <CollectAllocationsModal
         visible={collectOpen}
         onHide={closeCollectModal}
@@ -809,8 +880,12 @@ export default function TransferRequestsDetailPage() {
         connected={connected}
         DocEntry={Number(DocEntry)}
         DocNum={Number(DocNum)}
+        WorkAreaDocEntry={headerInfo?.U_WorkArea ?? null}
         line={collectLine}
       />
     </>
   );
 }
+
+
+

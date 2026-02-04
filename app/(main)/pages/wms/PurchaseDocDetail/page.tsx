@@ -1,9 +1,10 @@
-'use client';
+﻿'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import { Card } from 'primereact/card';
+import { Dialog } from 'primereact/dialog';
 import { Toast } from 'primereact/toast';
 import { Tag } from 'primereact/tag';
 import { Button } from 'primereact/button';
@@ -13,10 +14,13 @@ import { Column } from 'primereact/column';
 import { InputText } from 'primereact/inputtext';
 import { ProgressBar } from 'primereact/progressbar';
 import { FilterMatchMode } from 'primereact/api';
+import { ConfirmDialog, confirmDialog } from 'primereact/confirmdialog';
+import { Dropdown } from 'primereact/dropdown';
 
 import api from '@/app/api/api';
 import { usePurchaseDocRoom } from '@/app/socket/usePurchaseDocRoom';
 import { InputNumber } from 'primereact/inputnumber';
+import ItemsPickerModal, { PickedItemT } from '../../components/ItemsPickerModal';
 
 type PurchaseDocRowT = {
   DocNum: number;
@@ -40,8 +44,12 @@ type PurchaseDocRowT = {
   CollectedQuantity?: number | string;
   RemainingQuantity?: number | string;
   CollectedCount?: number | string;
+  LineNum?: number;
   lineNum?: number;
 };
+
+type WhsApiT = { WhsCode: string; WhsName: string; BPLid?: number; BinActivat?: 'Y' | 'N' };
+type BinApiT = { BinAbsEntry: number; BinCode: string; WhsCode?: string; WhsName?: string; AbsEntry?: number };
 
 const num = (v: any) => {
   const n = Number(v);
@@ -77,24 +85,45 @@ export default function PurchaseDocDetailPage() {
 
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<PurchaseDocRowT[]>([]);
+  const [selectedRows, setSelectedRows] = useState<PurchaseDocRowT[]>([]);
+  const [itemsModalOpen, setItemsModalOpen] = useState(false);
+  const [sendModalOpen, setSendModalOpen] = useState(false);
+  const [sendingToSap, setSendingToSap] = useState(false);
+
+  const [warehouses, setWarehouses] = useState<WhsApiT[]>([]);
+  const [bins, setBins] = useState<BinApiT[]>([]);
+  const [whsLoading, setWhsLoading] = useState(false);
+  const [binsLoading, setBinsLoading] = useState(false);
+  const [selectedWhs, setSelectedWhs] = useState<string | null>(null);
+  const [selectedBin, setSelectedBin] = useState<BinApiT | null>(null);
 
   const [globalFilterValue, setGlobalFilterValue] = useState('');
   const [filters, setFilters] = useState<DataTableFilterMeta>({
     global: { value: null, matchMode: FilterMatchMode.CONTAINS },
   });
   const lineKey = (r: PurchaseDocRowT) =>
-  `${String(r.ItemCode || '').trim()}|||${String(r.WhsCode || '').trim()}`;
+    `${String(r.ItemCode || '').trim()}|||${String(r.WhsCode || '').trim()}`;
 
-const [editCollected, setEditCollected] = useState<Record<string, number>>({});
-const [dirty, setDirty] = useState<Record<string, boolean>>({});
-const [saving, setSaving] = useState<Record<string, boolean>>({});
+  const [editCollected, setEditCollected] = useState<Record<string, number>>({});
+  const [dirty, setDirty] = useState<Record<string, boolean>>({});
+  const [saving, setSaving] = useState<Record<string, boolean>>({});
 
 // yuqorida state qo'shing
-const [mounted, setMounted] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
-useEffect(() => {
-  setMounted(true);
-}, []);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const whsOptions = useMemo(
+    () => warehouses.map((w) => ({ label: `${w.WhsCode} - ${w.WhsName}`, value: w.WhsCode })),
+    [warehouses]
+  );
+
+  const binOptions = useMemo(
+    () => bins.map((b) => ({ label: b.BinCode, value: String(b.BinAbsEntry) })),
+    [bins]
+  );
 
 
   const headerInfo = useMemo(() => {
@@ -166,10 +195,11 @@ useEffect(() => {
       const data = (res?.data ?? res) as PurchaseDocRowT[];
       const normalized = (Array.isArray(data) ? data : []).map((r, idx) => ({
         ...r,
-        lineNum: idx + 1,
+        lineNum: r.LineNum ?? idx + 1,
       }));
 
       setRows(normalized);
+      setSelectedRows([]);
       setEditCollected(() => {
         const next: Record<string, number> = {};
         for (const r of normalized) {
@@ -236,11 +266,197 @@ useEffect(() => {
         return;
       }
 
-      // UI yangilanish serverdan "purchaseDoc:lineUpdated" bilan keladi
       toast.current?.show({ severity: 'success', summary: 'Сохранено', detail: r.ItemCode, life: 1200 });
     }
   );
 };
+  const addItems = async (items: PickedItemT[]) => {
+    await api.post('/postPurchaseDocAddItemsApi', {
+      DocEntry: Number(DocEntry),
+      DocNum: Number(DocNum),
+      Items: items,
+    });
+
+    toast.current?.show({
+      severity: 'success',
+      summary: 'Готово',
+      detail: `Добавлено: ${items.length}`,
+      life: 2500,
+    });
+
+    await load();
+  };
+
+  const deleteLine = async (r: PurchaseDocRowT) => {
+    try {
+      await api.post('/deletePurchaseDocLineApi', {
+        DocEntry: Number(DocEntry),
+        DocNum: Number(DocNum),
+        LineNum: r.LineNum ?? r.lineNum ?? null,
+        ItemCode: r.ItemCode,
+        WhsCode: r.WhsCode,
+      });
+
+      setRows((prev) => prev.filter((x) => lineKey(x) !== lineKey(r)));
+      toast.current?.show({ severity: 'success', summary: 'Удалено', detail: r.ItemCode, life: 2000 });
+    } catch (e: any) {
+      toast.current?.show({
+        severity: 'error',
+        summary: 'Ошибка',
+        detail: e?.response?.data?.message || 'Не удалось удалить строку',
+        life: 3500,
+      });
+    }
+  };
+
+  const confirmDelete = (r: PurchaseDocRowT) => {
+    confirmDialog({
+      header: 'Удалить товар?',
+      icon: 'pi pi-exclamation-triangle',
+      message: `Удалить ${r.ItemCode} ${r.ItemName || ''}?`,
+      acceptLabel: 'Удалить',
+      rejectLabel: 'Отмена',
+      acceptClassName: 'p-button-danger',
+      accept: () => deleteLine(r),
+    });
+  };
+
+  const loadWhs = async () => {
+    try {
+      setWhsLoading(true);
+      const res = await api.get('/getWhsCodesApi');
+      setWarehouses((res?.data ?? res) as WhsApiT[]);
+    } catch {
+      setWarehouses([]);
+    } finally {
+      setWhsLoading(false);
+    }
+  };
+
+  const loadBins = async (whsCode: string) => {
+    try {
+      setBinsLoading(true);
+      const res = await api.get('/getBinsWhsApi', { params: { WhsCode: whsCode } });
+      const data = (res?.data ?? res) as BinApiT[];
+      const arr = (Array.isArray(data) ? data : [])
+        .map((b: any) => {
+          const binAbs = Number(b.BinAbsEntry ?? b.AbsEntry ?? b.binAbsEntry ?? b.absEntry);
+          const binCode = String(b.BinCode ?? b.binCode ?? '').trim();
+          return {
+            ...b,
+            BinAbsEntry: binAbs,
+            BinCode: binCode,
+            WhsCode: String(b.WhsCode ?? b.whsCode ?? '').trim() || undefined,
+            WhsName: String(b.WhsName ?? b.whsName ?? '').trim() || undefined,
+          } as BinApiT;
+        })
+        .filter((b: BinApiT) => Number.isFinite(b.BinAbsEntry) && !!String(b.BinCode || '').trim());
+      setBins(arr);
+      const first = arr[0] || null;
+      setSelectedBin((prev) => (prev && arr.some((b) => b.BinAbsEntry === prev.BinAbsEntry) ? prev : first));
+    } catch {
+      setBins([]);
+      setSelectedBin(null);
+    } finally {
+      setBinsLoading(false);
+    }
+  };
+
+  const sendToSap = async () => {
+    const lines = selectedRows
+      .map((r) => {
+        const key = lineKey(r);
+        return {
+          ItemCode: r.ItemCode,
+          WhsCode: r.WhsCode,
+          LineNum: r.LineNum ?? r.lineNum ?? null,
+          Quantity: num(editCollected[key] ?? r.CollectedQuantity ?? 0),
+        };
+      })
+      .filter((x) => x.Quantity > 0);
+
+    if (!lines.length) {
+      toast.current?.show({
+        severity: 'warn',
+        summary: 'Проверка',
+        detail: 'Выберите строки и укажите количество',
+        life: 2500,
+      });
+      return;
+    }
+    if (!selectedWhs) {
+      toast.current?.show({
+        severity: 'warn',
+        summary: 'Проверка',
+        detail: 'Выберите склад',
+        life: 2500,
+      });
+      return;
+    }
+    if (!selectedBin?.BinAbsEntry) {
+      toast.current?.show({
+        severity: 'warn',
+        summary: 'Проверка',
+        detail: 'Выберите ячейку',
+        life: 2500,
+      });
+      return;
+    }
+
+    try {
+      setSendingToSap(true);
+      const res = await api.post('/postPurchaseDocSendToSapApi', {
+        DocEntry: Number(DocEntry),
+        DocNum: Number(DocNum),
+        Lines: lines,
+        WhsCode: selectedWhs,
+        WhsName: warehouses.find((w) => w.WhsCode === selectedWhs)?.WhsName || null,
+        BinAbsEntry: Number(selectedBin.BinAbsEntry),
+        BinCode: selectedBin.BinCode || null,
+      });
+
+      const payload = res?.data ?? res;
+      const docEntryFromSap =
+        [payload?.DocEntry, payload?.docEntry, payload?.DocEntryOut, payload?.docEntryOut, payload?.SapDocEntry, payload?.sapDocEntry,
+          payload?.result?.DocEntry, payload?.result?.docEntry, payload?.data?.DocEntry, payload?.data?.docEntry, payload?.data?.result?.DocEntry, payload?.data?.result?.docEntry]
+          .map((v: any) => Number(v))
+          .find((n: number) => Number.isFinite(n) && n > 0) || null;
+
+      toast.current?.show({
+        severity: 'success',
+        summary: 'Отправлено',
+        detail: docEntryFromSap ? `Строк: ${lines.length} • DocEntry: ${docEntryFromSap}` : `Строк: ${lines.length}`,
+        life: 2500,
+      });
+      setSendModalOpen(false);
+
+      if (docEntryFromSap) {
+        router.push(`/wms/purchase-archive/detail?DocEntry=${docEntryFromSap}`);
+      }
+    } catch (e: any) {
+      toast.current?.show({
+        severity: 'error',
+        summary: 'Ошибка',
+        detail: e?.response?.data?.message || 'Не удалось отправить в SAP',
+        life: 3500,
+      });
+    } finally {
+      setSendingToSap(false);
+    }
+  };
+
+  const confirmSendToSap = () => {
+    if (!selectedRows.length) {
+      toast.current?.show({
+        severity: 'warn',
+        summary: 'Проверка',
+        detail: 'Сначала выберите строки в таблице',
+        life: 2500,
+      });
+      return;
+    }
+    setSendModalOpen(true);
+  };
 
 
   useEffect(() => {
@@ -283,6 +499,32 @@ useEffect(() => {
   useEffect(() => {
     load();
   }, [DocEntry]);
+
+  const selectedWhsDefault = useMemo(() => {
+    const set = new Set(
+      (selectedRows || [])
+        .map((r) => String(r.WhsCode || '').trim())
+        .filter((s) => s)
+    );
+    return set.size === 1 ? Array.from(set)[0] : null;
+  }, [selectedRows]);
+
+  useEffect(() => {
+    if (!sendModalOpen) return;
+    loadWhs();
+    setSelectedWhs((prev) => prev || selectedWhsDefault || null);
+    setSelectedBin(null);
+  }, [sendModalOpen, selectedWhsDefault]);
+
+  useEffect(() => {
+    if (!sendModalOpen) return;
+    if (!selectedWhs) {
+      setBins([]);
+      setSelectedBin(null);
+      return;
+    }
+    loadBins(selectedWhs);
+  }, [sendModalOpen, selectedWhs]);
 
   const docStatusTag = useMemo(() => {
     if (!rows.length) return <Tag value="Пусто" severity="secondary" />;
@@ -401,15 +643,8 @@ const saveAllDirty = () => {
           label="Отправить в SAP"
           icon="pi pi-send"
           severity="success"
-          disabled={!rows.length || totals.remaining > 0}
-          onClick={() => {
-            toast.current?.show({
-              severity: 'info',
-              summary: 'SAP',
-              detail: 'Пока без API. Дальше подключим отправку.',
-              life: 2500,
-            });
-          }}
+          disabled={!rows.length || sendingToSap}
+          onClick={confirmSendToSap}
         />
         <Button
           label="Barcode"
@@ -474,12 +709,14 @@ const saveAllDirty = () => {
   return (
     <>
       <Toast ref={toast} />
+      <ConfirmDialog />
 
       <div className="flex flex-column gap-3">
         <div className="flex align-items-center justify-content-between gap-2 flex-wrap">
           <div className="flex align-items-center gap-2 flex-wrap">
             <Button label="Назад" icon="pi pi-arrow-left" severity="secondary" onClick={() => router.back()} />
             <Button label={loading ? 'Загрузка...' : 'Обновить'} icon="pi pi-refresh" severity="secondary" disabled={loading} onClick={load} />
+            <Button label="Добавить товары" icon="pi pi-plus" onClick={() => setItemsModalOpen(true)} />
             {docStatusTag}
           </div>
 
@@ -585,10 +822,13 @@ const saveAllDirty = () => {
               scrollable
               scrollHeight="560px"
               rowClassName={rowClassName}
+              selection={selectedRows}
+              onSelectionChange={(e : any) => setSelectedRows(e.value as PurchaseDocRowT[])}
               filters={filters}
               onFilter={(e) => setFilters(e.filters)}
               globalFilterFields={['ItemCode', 'ItemName']}
             >
+              <Column selectionMode="multiple" headerStyle={{ width: '3rem' }} />
               <Column field="lineNum" header="#" style={{ width: 70 }} />
               <Column field="ItemCode" header="Код" sortable style={{ minWidth: 140 }} />
               <Column field="ItemName" header="Товар" sortable style={{ minWidth: 320 }} />
@@ -616,7 +856,6 @@ const saveAllDirty = () => {
                     <InputNumber
                     value={value}
                     min={0}
-                    max={open}
                     inputStyle={{ width: 120, textAlign: 'right' }}
                     onValueChange={(e) => {
                         const v = num(e.value);
@@ -631,7 +870,7 @@ const saveAllDirty = () => {
                       text
                       disabled={!connected || !isDirty || isSaving}
                       onClick={() => saveCollected(r)}
-                      tooltip="РЎРѕС…СЂР°РЅРёС‚СЊ"
+                      tooltip="Сохранить"
                     />
                 </div>
                 );
@@ -693,6 +932,13 @@ const saveAllDirty = () => {
               />
 
               <Column field="WhsCode" header="Whs" sortable style={{ minWidth: 90 }} />
+              <Column
+                header=""
+                style={{ width: 70 }}
+                body={(r: PurchaseDocRowT) => (
+                  <Button icon="pi pi-trash" severity="danger" text onClick={() => confirmDelete(r)} />
+                )}
+              />
             </DataTable>
           </div>
 
@@ -701,6 +947,71 @@ const saveAllDirty = () => {
           {footer}
         </Card>
       </div>
+
+
+      <ItemsPickerModal
+        visible={itemsModalOpen}
+        onHide={() => setItemsModalOpen(false)}
+        endpoint="/getItemsForPurchaseDocApi"
+        params={{ DocEntry, DocNum }}
+        onSubmit={addItems}
+      />
+
+      <Dialog
+        header="Отправить в SAP"
+        visible={sendModalOpen}
+        onHide={() => setSendModalOpen(false)}
+        style={{ width: '36rem', maxWidth: '95vw' }}
+        modal
+        draggable={false}
+      >
+        <div className="flex flex-column gap-3">
+          <div>
+            <label className="block mb-2">Склад</label>
+            <Dropdown
+              value={selectedWhs}
+              options={whsOptions}
+              onChange={(e) => setSelectedWhs(e.value)}
+              placeholder={whsLoading ? 'Загрузка...' : 'Выберите склад'}
+              filter
+              showClear
+              className="w-full"
+              disabled={whsLoading}
+            />
+          </div>
+
+          <div>
+            <label className="block mb-2">Ячейка</label>
+            <Dropdown
+              value={selectedBin?.BinAbsEntry != null ? String(selectedBin.BinAbsEntry) : null}
+              options={binOptions}
+              onChange={(e) => {
+                const found = bins.find((b) => String(b.BinAbsEntry) === String(e.value)) || null;
+                setSelectedBin(found);
+              }}
+              placeholder={selectedWhs ? (binsLoading ? 'Загрузка...' : 'Выберите ячейку') : 'Сначала выберите склад'}
+              filter
+              showClear
+              className="w-full"
+              disabled={!selectedWhs || binsLoading}
+            />
+          </div>
+
+          <div className="flex justify-content-end gap-2">
+            <Button label="Отмена" severity="secondary" onClick={() => setSendModalOpen(false)} />
+            <Button
+              label={sendingToSap ? 'Отправка...' : 'Отправить'}
+              icon="pi pi-send"
+              severity="success"
+              disabled={sendingToSap}
+              onClick={sendToSap}
+            />
+          </div>
+        </div>
+      </Dialog>
     </>
   );
 }
+
+
+

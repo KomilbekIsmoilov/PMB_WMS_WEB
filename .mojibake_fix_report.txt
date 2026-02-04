@@ -1,0 +1,4 @@
+checked 67
+changed 2
+c:\Users\user\Desktop\PMB_web\sakai-react\app\(main)\pages\wms\SalesOrdersDetail\page.tsx
+c:\Users\user\Desktop\PMB_web\sakai-react\app\(main)\pages\wms\TransferRequestsDetail\page.tsx

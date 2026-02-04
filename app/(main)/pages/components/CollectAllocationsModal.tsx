@@ -73,7 +73,7 @@ type AllocationT = {
   BinCode: string;
 
   IsBatchManaged: 'Y' | 'N';
-  BatchNumber: string; // ✅ doim string: '' yoki 'BATCH1'
+  BatchNumber: string; 
   ExpDate?: string | null;
 
   Qty: number;
@@ -90,11 +90,11 @@ type Props = {
 
   DocEntry: number;
   DocNum: number;
+  WorkAreaDocEntry?: number | null;
 
   line: CollectLineT | null;
 };
 
-// ---------------- helpers ----------------
 const normStr = (v: any) => String(v ?? '').trim();
 const num = (v: any) => {
   const n = Number(v);
@@ -103,30 +103,8 @@ const num = (v: any) => {
 const fmtNum = (v: any, digits = 2) =>
   new Intl.NumberFormat('ru-RU', { maximumFractionDigits: digits, minimumFractionDigits: 0 }).format(num(v));
 
-const kKey = (binAbs: any, batch: any) => `${Number(binAbs)}|||${normStr(batch)}`; // batch '' bo'lishi mumkin
+const kKey = (binAbs: any, batch: any) => `${Number(binAbs)}|||${normStr(batch)}`; 
 const kOnHand = (r: OnHandRowT) => kKey(r.BinAbsEntry, r.BatchNumber);
-
-const extractEmpID = (e: any) => {
-  const by = e?.by ?? e?.By ?? e?.collector ?? e?.user ?? null;
-
-  const cand = [
-    by?.empID,
-    by?.EmpID,
-    by?.U_UserCode,
-    e?.empID,
-    e?.EmpID,
-    e?.U_UserCode,
-    e?.CollectorEmpID,
-    e?.collectorEmpID,
-  ];
-
-  for (const c of cand) {
-    const n = Number(String(c ?? '').trim());
-    if (Number.isFinite(n) && n > 0) return n;
-  }
-  return 0;
-};
-
 
 
 const buildSavedAllocsFromLine = (ln: CollectLineT | null): AllocationT[] => {
@@ -207,6 +185,7 @@ export default function CollectAllocationsModal({
   connected,
   DocEntry,
   DocNum,
+  WorkAreaDocEntry,
   line,
 }: Props) {
   // ---------------- state ----------------
@@ -302,10 +281,14 @@ export default function CollectAllocationsModal({
   };
 
   const loadCollectors = async () => {
-    if (!DocEntry) return;
+    const workAreaId = Number(WorkAreaDocEntry);
+    if (!Number.isFinite(workAreaId) || workAreaId <= 0) {
+      setCollectors([]);
+      return;
+    }
     try {
       setCollectorsLoading(true);
-      const res = await api.get('/getCollectorsWorkAreaApi', { params: { DocEntry } });
+      const res = await api.get('/getCollectorsWorkAreaApi', { params: { DocEntry: workAreaId } });
       const data = (res?.data ?? res) as any[];
 
       const list: CollectorOptionT[] = (Array.isArray(data) ? data : [])
@@ -356,7 +339,7 @@ export default function CollectAllocationsModal({
 
     loadCollectors();
     loadOnHand();
-  }, [visible, DocEntry, line?.ItemCode, line?.WhsCode]);
+  }, [visible, WorkAreaDocEntry, line?.ItemCode, line?.WhsCode]);
 
   useEffect(() => {
     if (!visible) return;

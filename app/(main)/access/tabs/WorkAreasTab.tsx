@@ -72,6 +72,10 @@ const getUserCode = (u: UserApiT) => {
   return u.U_LOGIN && u.U_LOGIN.trim() ? u.U_LOGIN.trim() : String(u.empID);
 };
 
+const getCollectorCode = (u: UserApiT) => {
+  return String(u.empID ?? '').trim();
+};
+
 const getDept = (u: UserApiT) => {
   const n = Number(u.dept);
   return Number.isFinite(n) ? n : 0;
@@ -136,7 +140,7 @@ export default function WorkAreasTab() {
     return users
       .filter((u) => getDept(u) === 2)
       .map((u) => {
-        const code = getUserCode(u);
+        const code = getCollectorCode(u);
         const fullName = `${u.lastName || ''} ${u.firstName || ''}`.trim();
         return { label: `${code} - ${fullName || 'Без имени'}`, value: code };
       });
@@ -153,7 +157,21 @@ export default function WorkAreasTab() {
   }, [collectorRows]);
 
   const optionsForCollectorRow = (row: CollectorRowT) => {
-    return collectorOptions.filter((o) => !usedCollectorCodes.has(o.value) || o.value === row.userCode);
+    const base = collectorOptions.filter((o) => !usedCollectorCodes.has(o.value) || o.value === row.userCode);
+    if (row.userCode && !base.some((o) => o.value === row.userCode)) {
+      return [{ label: `${row.userCode} - (не найдено)`, value: row.userCode }, ...base];
+    }
+    return base;
+  };
+
+  const normalizeCollectorCode = (code: string) => {
+    const trimmed = code.trim();
+    if (!trimmed) return '';
+    const byEmpId = users.find((u) => String(u.empID) === trimmed);
+    if (byEmpId) return String(byEmpId.empID);
+    const byLogin = users.find((u) => (u.U_LOGIN || '').trim() === trimmed);
+    if (byLogin) return String(byLogin.empID);
+    return trimmed;
   };
 
   const workAreaOptions: { label: string; value: number }[] = useMemo(() => {
@@ -197,7 +215,11 @@ export default function WorkAreasTab() {
       const res = await api.get('/getWorksAreaRowsApi', { params: { docEntry: de } });
       const rows = unwrap<WorkAreaRowApiT[]>(res) || [];
 
-      const collectors = rows.map((r) => safeStr(r.U_UserCode).trim()).filter(Boolean);
+      const collectors = rows
+        .map((r) => safeStr(r.U_UserCode).trim())
+        .filter(Boolean)
+        .map((code) => normalizeCollectorCode(code))
+        .filter(Boolean);
       setCollectorRows(collectors.map((code) => ({ id: uid(), userCode: code })));
     } catch (e: any) {
       toast.current?.show({
@@ -216,9 +238,7 @@ export default function WorkAreasTab() {
     loadDictionariesAndWorkAreas();
   }, []);
 
-  // ===== MODE: CREATE NEW =====
   const startCreateNew = () => {
-    // agar xohlasang confirm ham qo‘shamiz, hozir sodda
     setSelectedWorkArea(null);
     setDocEntry(null);
     setDocNum(null);
@@ -230,7 +250,6 @@ export default function WorkAreasTab() {
     toast.current?.show({ severity: 'info', summary: 'Режим', detail: 'Создание новой рабочей зоны', life: 2000 });
   };
 
-  // ===== APPLY EXISTING =====
   const applyHeaderToForm = async (header: WorkAreaHeaderApiT) => {
     const de = header.DocEntry;
 
@@ -265,7 +284,6 @@ export default function WorkAreasTab() {
     await applyHeaderToForm(header);
   };
 
-  // ===== RESET =====
   const askReset = () => {
     confirmDialog({
       message: 'Сбросить форму?',
@@ -343,14 +361,13 @@ export default function WorkAreasTab() {
 
     const payloadBase = {
       Remark: remark?.trim() || '',
-      U_Filial: branch,             
-      U_Checker: checker,           
-      U_WhsCodes: warehouses,       
+      U_Filial: branch,
+      U_Checker: checker, 
+      U_WhsCodes: warehouses,
       Collectors: collectorsPayload, 
     };
 
     if (docEntry) {
-      // UPDATE
       const payload = {
         action: 'update',
         DocEntry: docEntry,

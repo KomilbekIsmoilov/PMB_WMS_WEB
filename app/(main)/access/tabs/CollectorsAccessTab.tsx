@@ -149,10 +149,10 @@ export default function CollectorsAccessTab() {
     try {
       setSaving(true);
       if (isNew) {
-        await api.post('/postUsersWebApi', payloadBase);
+        await api.post('/postEmployeeAccessApi', payloadBase);
         toast.current?.show({ severity: 'success', summary: 'Готово', detail: 'Сборщик создан', life: 2500 });
       } else {
-        await api.post('/patchUsersWebApi', { empID: form.empID, ...payloadBase });
+        await api.post('/patchEmployeeAccessApi', { empID: form.empID, ...payloadBase });
         toast.current?.show({ severity: 'success', summary: 'Готово', detail: 'Сборщик обновлён', life: 2500 });
       }
       setDialogOpen(false);

@@ -199,7 +199,7 @@ export default function SettingsAccessTab() {
 
     try {
       setSaving(true);
-      await api.post('/patchUsersWebApi', payload);
+      await api.post('/patchEmployeeAccessApi', payload);
       toast.current?.show({ severity: 'success', summary: 'Готово', detail: 'Настройки сохранены', life: 2500 });
       await load(form.empID);
     } catch (e: any) {
