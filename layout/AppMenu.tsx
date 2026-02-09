@@ -22,7 +22,7 @@ const AppMenu = () => {
         { label: 'Заказы на продажу', icon: 'pi pi-fw pi-truck', to: '/pages/wms/SalesOrders' },
         { label: 'Запросы на перемещение', icon: 'pi pi-fw pi-arrows-h', to: '/pages/wms/TransferRequests' },
         { label: 'Место → Место', icon: 'pi pi-fw pi-exchange', to: '/wms/bin-transfer' },
-        // { label: 'Возвраты', icon: 'pi pi-fw pi-replay', to: '/wms/returns' },
+        { label: 'Возвраты', icon: 'pi pi-fw pi-replay', to: '/wms/returns' },
         { label: 'Доставка', icon: 'pi pi-fw pi-truck', to: '/wms/delivery-docs' },
       ],
     },

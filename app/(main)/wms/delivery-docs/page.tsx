@@ -122,6 +122,9 @@ const statusRowClass = (r: DeliveryDocT) => {
   return '';
 };
 
+const OBJ_DELIVERY = 15;
+const OBJ_TRANSFER_REQUEST = 67;
+
 export default function DeliveryDocsPage() {
   const toast = useRef<Toast>(null);
   const dtRef = useRef<DataTable<DeliveryDocT[]>>(null);
@@ -160,9 +163,16 @@ export default function DeliveryDocsPage() {
   const detailHref = useCallback((r: DeliveryDocT) => {
     const docEntry = encodeURIComponent(String(r.DocEntry ?? ''));
     const docNum = encodeURIComponent(String(r.DocNum ?? ''));
+    const rawObjType = Number(r.ObjType);
     const type = String(r.DocType ?? '').toUpperCase();
-    if (type === 'TRANSFER') return `/pages/wms/TransferRequestsDetail?DocEntry=${docEntry}&DocNum=${docNum}`;
-    return `/pages/wms/SalesOrdersDetail?DocEntry=${docEntry}&DocNum=${docNum}`;
+    const resolvedObjType = Number.isFinite(rawObjType)
+      ? rawObjType
+      : type === 'TRANSFER'
+      ? OBJ_TRANSFER_REQUEST
+      : OBJ_DELIVERY;
+    const objType = encodeURIComponent(String(resolvedObjType));
+    const docType = encodeURIComponent(String(r.DocType ?? ''));
+    return `/pages/wms/DeliveryDocsDetail?DocEntry=${docEntry}&DocNum=${docNum}&ObjType=${objType}&DocType=${docType}`;
   }, []);
 
   const setFieldFilter = (field: string, value: any, matchMode: any) => {

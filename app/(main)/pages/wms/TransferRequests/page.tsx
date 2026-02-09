@@ -700,12 +700,12 @@ const selectedDocEntriesWithoutWA = useMemo(() => {
           visible={assignModalOpen}
           onHide={() => setAssignModalOpen(false)}
           docNums={selectedDocEntriesWithoutWA}
-          DocType="SalesOrder"
-          onSubmit={async ({ workAreaDocEntry, docNums }) => {
+          DocType="TransferRequest"
+          onSubmit={async ({ workAreaDocEntry, docNums, collectorEmpIDs }) => {
             try { 
-              await api.post('/updateTransfersworkArea', { workAreaDocEntry, docNums })
+              await api.post('/updateTransfersworkArea', { workAreaDocEntry, docNums, collectorEmpIDs })
 
-            console.log('ASSIGN_WORKAREA_ORDERS =>', { workAreaDocEntry, docNums });
+            console.log('ASSIGN_WORKAREA_ORDERS =>', { workAreaDocEntry, docNums, collectorEmpIDs });
 
             toast.current?.show({
               severity: 'success',

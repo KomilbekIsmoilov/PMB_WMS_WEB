@@ -74,6 +74,7 @@ type ReturnDocT = {
   DocDate?: string | null;
   CardCode?: string | null;
   CardName?: string | null;
+  U_State?: string | null;
   Status?: string | null;
 };
 
@@ -266,7 +267,7 @@ export default function WmsDashboardPage() {
         api.get('/getTransferDocsApi'),
         api.get('/getPurchaseDocsApi'),
         api.get('/getDeliveryDocsApi'),
-        api.get('/getReturnDocsApi'),
+        api.get('/getSalesReturnDocsApi'),
         api.get('/getBinToBinApi'),
         api.get('/getPickersActivityReportApi', {
           params: {
@@ -350,7 +351,7 @@ export default function WmsDashboardPage() {
     () => countStatuses(deliveriesFiltered, (r) => (r as DeliveryDocT).deliveryLog?.status ?? (r as DeliveryDocT).U_State),
     [deliveriesFiltered]
   );
-  const returnStatus = useMemo(() => countStatuses(returnsFiltered, (r) => (r as ReturnDocT).Status), [returnsFiltered]);
+  const returnStatus = useMemo(() => countStatuses(returnsFiltered, (r) => (r as ReturnDocT).U_State ?? (r as ReturnDocT).Status), [returnsFiltered]);
   const binStatus = useMemo(() => countStatuses(binTransfersFiltered, (r) => (r as BinTransferDocT).Status), [binTransfersFiltered]);
 
   const recentDocs = useMemo<RecentRowT[]>(() => {
@@ -420,7 +421,7 @@ export default function WmsDashboardPage() {
         DocDate: r.DocDate ?? null,
         Title: r.CardName ?? null,
         Code: r.CardCode ?? null,
-        Status: r.Status ?? null,
+        Status: r.U_State ?? r.Status ?? null,
       });
     });
 
@@ -730,7 +731,10 @@ export default function WmsDashboardPage() {
               <Column header="Дата" body={(r: ReturnDocT) => fmtDate(r.DocDate)} style={{ width: 120 }} />
               <Column
                 header="Статус"
-                body={(r: ReturnDocT) => <Tag value={r.Status ? String(r.Status) : '-'} severity={statusSeverity(r.Status)} />}
+                body={(r: ReturnDocT) => {
+                  const s = r.U_State ?? r.Status;
+                  return <Tag value={s ? String(s) : '-'} severity={statusSeverity(s)} />;
+                }}
                 style={{ width: 140 }}
               />
             </DataTable>

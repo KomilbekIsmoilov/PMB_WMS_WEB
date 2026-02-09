@@ -431,8 +431,8 @@ return selectedWithoutWorkArea.map((r) => Number(r.DocEntry)).filter((n) => Numb
             onHide={() => setAssignModalOpen(false)}
             docNums={selectedDocEntriesWithoutWA}
             DocType="PurchaseDoc"
-            onSubmit={async ({ workAreaDocEntry, docNums }) => {try { 
-              await api.post('/updatePurchaseworkAreaApi', { workAreaDocEntry, docNums })
+            onSubmit={async ({ workAreaDocEntry, docNums, collectorEmpIDs }) => {try { 
+              await api.post('/updatePurchaseworkAreaApi', { workAreaDocEntry, docNums, collectorEmpIDs })
             toast.current?.show({
               severity: 'success',
               summary: 'Готово',
